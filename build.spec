@@ -22,6 +22,7 @@ block_cipher = None
 # 需要被一同打包进程序结构里的相关资源文件
 datas = [
     (os.path.join(project_root, 'src/web/react_dist'), 'src/web/react_dist'),
+    (os.path.join(project_root, 'lib/js/douyin.js'), 'lib/js'),
     # 如果有其他非 Python 资源，也应添加到这里
 ]
 

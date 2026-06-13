@@ -344,7 +344,7 @@ def _generate_spider_rc4_bb(
     b[40] = data_hash[21]
     b[41] = data_hash[22]
     # The current Spider VM receives a hard-coded Firefox UA, but its compiled
-    # path emits these two UA hash bytes rather than the older signer slots.
+    # path emits these two UA hash bytes rather than the legacy douyin.js slots.
     b[42] = 145
     b[43] = 238
     b[44:48] = (end_time & _U32_MASK).to_bytes(4, "big")
