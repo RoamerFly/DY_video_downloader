@@ -5425,6 +5425,13 @@ def comment_publish():
         text = str(data.get('text') or '').strip()
         reply_id = str(data.get('reply_id') or '').strip()
         reply_to_reply_id = str(data.get('reply_to_reply_id') or '').strip()
+        logger.info(
+            "comment_publish route received: aweme_id=%s text_len=%s reply=%s api_ready=%s",
+            aweme_id,
+            len(text),
+            bool(reply_id),
+            bool(api),
+        )
 
         if not aweme_id:
             return jsonify({'success': False, 'message': '视频ID不能为空'}), 400
