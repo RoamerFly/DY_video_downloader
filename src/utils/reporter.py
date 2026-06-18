@@ -18,9 +18,9 @@ def _send_report_async(
     try:
         # Avoid circular import by importing Config inside the function
         from src.config.config import Config
-        app_version = (getattr(Config, "APP_VERSION", "1.0.25") or "1.0.25").lstrip("v")
+        app_version = (getattr(Config, "APP_VERSION", "1.0.26") or "1.0.26").lstrip("v")
     except Exception:
-        app_version = "1.0.25"
+        app_version = "1.0.26"
 
     try:
         payload = {
