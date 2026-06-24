@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toast";
 import { AppShell } from "@/components/layout/app-shell";
 import { GlobalAlert, GlobalLoader, GlobalVerifyRecovery } from "@/components/layout/global-feedback";
-import { useAlertStore, useAppStore, useLoaderStore, useLogStore } from "@/stores/app-store";
+import { useAlertStore, useAppStore, useLoaderStore, useLogStore, useUpdateStore } from "@/stores/app-store";
 import { useSocket } from "@/lib/socket";
 import { useKeyboard } from "@/hooks/use-keyboard";
 import { checkUpdate, downloadUpdate, getConfig, getFriendChatState, initClient, listenEvent, openExternalUrl, restartApp, verifyCookie } from "@/lib/tauri";
@@ -78,6 +78,10 @@ export default function App() {
     if (updateInFlightRef.current) return;
     updateInFlightRef.current = true;
     updateReadyPromptShownRef.current = false;
+    const updateStore = useUpdateStore.getState();
+    updateStore.setStatus("downloading");
+    updateStore.resetProgress();
+    updateStore.setMessage("正在下载更新包...");
 
     useLogStore.getState().addLog("开始后台下载更新", "info");
     showAlert({
@@ -100,10 +104,17 @@ export default function App() {
 
       const autoClosing = result.message.includes("自动关闭") || result.message.includes("即将关闭");
       useLogStore.getState().addLog(result.message || "更新下载完成", "success");
+      useUpdateStore.getState().setProgress({ progress: 100, speed_bps: 0 });
 
       if (!autoClosing && result.restart_required !== false) {
+        useUpdateStore.getState().setStatus("ready");
+        useUpdateStore.getState().setCanRestart(true);
+        useUpdateStore.getState().setMessage(result.message || "新版本已在后台下载并安装完成，重启后即可使用。");
         showUpdateReadyPrompt(result.message || "新版本已在后台下载并安装完成，重启后即可使用。");
       } else if (!autoClosing) {
+        useUpdateStore.getState().setStatus("ready");
+        useUpdateStore.getState().setCanRestart(false);
+        useUpdateStore.getState().setMessage(result.message || "更新包已下载完成，请按提示完成安装。");
         showAlert({
           title: "更新已下载",
           variant: "success",
@@ -115,6 +126,9 @@ export default function App() {
       const message = error instanceof Error ? error.message : "更新下载失败";
       useLogStore.getState().addLog(message, "error");
       updateReadyPromptShownRef.current = false;
+      useUpdateStore.getState().setStatus("error");
+      useUpdateStore.getState().setMessage(message);
+      useUpdateStore.getState().setCanRestart(false);
       showAlert({
         title: "更新失败",
         variant: "error",
@@ -231,6 +245,19 @@ export default function App() {
         );
         if (!disposed && update.has_update) {
           const updateNotes = normalizeUpdateNotes(update.notes);
+          const updateStore = useUpdateStore.getState();
+          updateStore.setStatus("available");
+          updateStore.setInfo({
+            version: update.version,
+            current_version: update.current_version,
+            notes: updateNotes || undefined,
+            asset_name: update.asset_name,
+            asset_size: update.asset_size,
+            download_url: update.download_url,
+            install_mode: update.install_mode,
+            portable: update.portable,
+          });
+          updateStore.setMessage(`发现新版本 ${update.version || ""}`.trim());
           showAlert({
             title: "发现新版本",
             variant: "info",
@@ -336,16 +363,34 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false;
+    let removeProgress: (() => void) | null = null;
     let removeFinished: (() => void) | null = null;
     let removeError: (() => void) | null = null;
 
     const setup = async () => {
+      removeProgress = await listenEvent<{
+        progress?: number | null;
+        downloaded?: number | null;
+        total?: number | null;
+        speed_bps?: number | null;
+        speedBps?: number | null;
+      }>("update-download-progress", (payload) => {
+        if (disposed) return;
+        const updateStore = useUpdateStore.getState();
+        updateStore.setStatus("downloading");
+        updateStore.setProgress(payload || {});
+      });
       removeFinished = await listenEvent<{
         message?: string;
         restart_required?: boolean;
         install_mode?: string;
       }>("update-download-finished", (payload) => {
         if (disposed) return;
+        const updateStore = useUpdateStore.getState();
+        updateStore.setStatus("ready");
+        updateStore.setProgress({ progress: 100, speed_bps: 0 });
+        updateStore.setMessage((current) => current || payload?.message || "更新已下载");
+        updateStore.setCanRestart(Boolean(payload?.restart_required ?? true));
         if (payload?.restart_required === false) {
           showAlert({
             title: "更新已下载",
@@ -362,6 +407,10 @@ export default function App() {
         updateInFlightRef.current = false;
         updateReadyPromptShownRef.current = false;
         const message = payload?.message || "更新下载失败";
+        const updateStore = useUpdateStore.getState();
+        updateStore.setStatus("error");
+        updateStore.setMessage(message);
+        updateStore.setCanRestart(false);
         useLogStore.getState().addLog(message, "error");
         showAlert({
           title: "更新失败",
@@ -376,6 +425,7 @@ export default function App() {
 
     return () => {
       disposed = true;
+      removeProgress?.();
       removeFinished?.();
       removeError?.();
     };

@@ -1562,12 +1562,14 @@ def _download_update_asset(
     }
     downloaded = 0
     last_emit = 0.0
+    started_at = time.monotonic()
     sha256 = hashlib.sha256()
 
     _emit_update_event('update_download_progress', {
         'progress': 0,
         'downloaded': 0,
         'total': 0,
+        'speed_bps': 0,
         'asset_name': filename,
     })
 
@@ -1584,6 +1586,8 @@ def _download_update_asset(
                 downloaded += len(chunk)
 
                 now = time.monotonic()
+                elapsed = max(now - started_at, 0.001)
+                speed_bps = int(downloaded / elapsed)
                 if total > 0:
                     progress = min(99.0, downloaded * 100 / total)
                 else:
@@ -1594,6 +1598,7 @@ def _download_update_asset(
                         'progress': progress,
                         'downloaded': downloaded,
                         'total': total,
+                        'speed_bps': speed_bps,
                         'asset_name': filename,
                     })
                     last_emit = now
@@ -1631,6 +1636,7 @@ def _download_update_asset(
         'progress': 100,
         'downloaded': downloaded,
         'total': downloaded,
+        'speed_bps': 0,
         'asset_name': filename,
     })
     return destination

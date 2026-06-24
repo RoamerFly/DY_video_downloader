@@ -120,6 +120,98 @@ export const useVerifyRecoveryStore = create<VerifyRecoveryStore>((set, get) => 
   dismiss: () => set({ isOpen: false, config: null }),
 }));
 
+// ── Update Store ──
+
+export type UpdateStatus = "idle" | "checking" | "available" | "none" | "downloading" | "ready" | "error";
+
+export interface UpdateInfo {
+  version?: string;
+  current_version?: string;
+  notes?: string;
+  asset_name?: string;
+  asset_size?: number;
+  download_url?: string;
+  install_mode?: string;
+  portable?: boolean;
+}
+
+interface UpdateState {
+  status: UpdateStatus;
+  message: string;
+  info: UpdateInfo | null;
+  progress: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  speedBps: number;
+  canRestart: boolean;
+  setStatus: (status: UpdateStatus) => void;
+  setMessage: (message: string | ((current: string) => string)) => void;
+  setInfo: (info: UpdateInfo | null) => void;
+  setCanRestart: (canRestart: boolean) => void;
+  resetProgress: () => void;
+  setProgress: (payload: {
+    progress?: number | null;
+    downloaded?: number | null;
+    total?: number | null;
+    speed_bps?: number | null;
+    speedBps?: number | null;
+  }) => void;
+}
+
+function clampProgress(progress: number) {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(100, progress));
+}
+
+function finiteBytes(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+export const useUpdateStore = create<UpdateState>((set) => ({
+  status: "idle",
+  message: "",
+  info: null,
+  progress: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
+  speedBps: 0,
+  canRestart: false,
+  setStatus: (status) => set({ status }),
+  setMessage: (message) =>
+    set((state) => ({
+      message: typeof message === "function" ? message(state.message) : message,
+    })),
+  setInfo: (info) =>
+    set((state) => ({
+      info,
+      totalBytes: finiteBytes(info?.asset_size) || state.totalBytes,
+    })),
+  setCanRestart: (canRestart) => set({ canRestart }),
+  resetProgress: () =>
+    set((state) => ({
+      progress: 0,
+      downloadedBytes: 0,
+      totalBytes: finiteBytes(state.info?.asset_size),
+      speedBps: 0,
+    })),
+  setProgress: (payload) =>
+    set((state) => {
+      const downloadedBytes = finiteBytes(payload.downloaded) || state.downloadedBytes;
+      const totalBytes = finiteBytes(payload.total) || finiteBytes(state.info?.asset_size) || state.totalBytes;
+      const explicitProgress = typeof payload.progress === "number" ? payload.progress : null;
+      const derivedProgress =
+        explicitProgress === null && totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : explicitProgress;
+
+      return {
+        progress: derivedProgress === null ? state.progress : clampProgress(derivedProgress),
+        downloadedBytes,
+        totalBytes,
+        speedBps: finiteBytes(payload.speed_bps ?? payload.speedBps) || state.speedBps,
+      };
+    }),
+}));
+
 // ── Download Store ──
 
 interface DownloadStore {

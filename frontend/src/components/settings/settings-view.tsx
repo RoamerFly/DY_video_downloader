@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useAppStore, useLogStore } from "@/stores/app-store";
+import { useAppStore, useLogStore, useUpdateStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,19 +53,9 @@ import {
   verifyCookie,
 } from "@/lib/tauri";
 import type { ThemeMode } from "@/types";
+import type { UpdateInfo } from "@/stores/app-store";
 
 type LoginStatus = "idle" | "starting" | "waiting" | "success" | "error" | "cancelled";
-type UpdateStatus = "idle" | "checking" | "available" | "none" | "downloading" | "ready" | "error";
-type UpdateInfo = {
-  version?: string;
-  current_version?: string;
-  notes?: string;
-  asset_name?: string;
-  asset_size?: number;
-  download_url?: string;
-  install_mode?: string;
-  portable?: boolean;
-};
 type SettingsField =
   | "theme"
   | "download_path"
@@ -175,11 +165,20 @@ export function SettingsView() {
 
   // Update state
   const [appVersion, setAppVersion] = useState("");
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
-  const [updateMessage, setUpdateMessage] = useState("");
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [updateProgress, setUpdateProgress] = useState(0);
-  const [updateCanRestart, setUpdateCanRestart] = useState(false);
+  const updateStatus = useUpdateStore((s) => s.status);
+  const updateMessage = useUpdateStore((s) => s.message);
+  const updateInfo = useUpdateStore((s) => s.info);
+  const updateProgress = useUpdateStore((s) => s.progress);
+  const updateDownloadedBytes = useUpdateStore((s) => s.downloadedBytes);
+  const updateTotalBytes = useUpdateStore((s) => s.totalBytes);
+  const updateSpeedBps = useUpdateStore((s) => s.speedBps);
+  const updateCanRestart = useUpdateStore((s) => s.canRestart);
+  const setUpdateStatus = useUpdateStore((s) => s.setStatus);
+  const setUpdateMessage = useUpdateStore((s) => s.setMessage);
+  const setUpdateInfo = useUpdateStore((s) => s.setInfo);
+  const setUpdateCanRestart = useUpdateStore((s) => s.setCanRestart);
+  const resetUpdateProgress = useUpdateStore((s) => s.resetProgress);
+  const setUpdateProgress = useUpdateStore((s) => s.setProgress);
 
   const cleanup = useCallback(() => {
     if (countdownRef.current) {
@@ -261,45 +260,6 @@ export function SettingsView() {
       cleanup();
     };
   }, [cleanup, setCookieLoggedIn]);
-
-  useEffect(() => {
-    let disposed = false;
-    let removeProgress: (() => void) | null = null;
-    let removeFinished: (() => void) | null = null;
-    let removeError: (() => void) | null = null;
-
-    const setup = async () => {
-      removeProgress = await listenEvent<{ progress?: number; downloaded?: number; total?: number }>(
-        "update-download-progress",
-        (payload) => {
-          if (disposed) return;
-          if (typeof payload.progress === "number") {
-            setUpdateProgress(Math.max(0, Math.min(100, payload.progress)));
-          }
-        }
-      );
-      removeFinished = await listenEvent("update-download-finished", () => {
-        if (disposed) return;
-        setUpdateStatus("ready");
-        setUpdateProgress(100);
-        setUpdateMessage((current) => current || "更新已下载");
-      });
-      removeError = await listenEvent<{ message?: string }>("update-download-error", (payload) => {
-        if (disposed) return;
-        setUpdateStatus("error");
-        setUpdateMessage(payload.message || "更新下载失败");
-      });
-    };
-
-    void setup();
-
-    return () => {
-      disposed = true;
-      removeProgress?.();
-      removeFinished?.();
-      removeError?.();
-    };
-  }, []);
 
   const startLogin = async () => {
     setLoginStatus("starting");
@@ -423,6 +383,11 @@ export function SettingsView() {
       unitIndex++;
     }
     return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const formatSpeed = (bytesPerSecond?: number) => {
+    const formatted = formatBytes(bytesPerSecond);
+    return formatted ? `${formatted}/s` : "";
   };
 
   const updateAssetName = (info: UpdateInfo | null) => {
@@ -864,7 +829,8 @@ export function SettingsView() {
 
   const handleDownloadUpdate = async () => {
     setUpdateStatus("downloading");
-    setUpdateProgress(0);
+    resetUpdateProgress();
+    setUpdateMessage("正在下载更新包...");
     try {
       const result = await downloadUpdate();
       if (!result.success) {
@@ -876,7 +842,7 @@ export function SettingsView() {
       }
       setUpdateCanRestart(!autoClosing && Boolean(result.restart_required ?? true));
       setUpdateMessage(result.message || "安装包已准备完成，重启后使用新版本");
-      setUpdateProgress(100);
+      setUpdateProgress({ progress: 100, speed_bps: 0 });
     } catch (error) {
       setUpdateStatus("error");
       setUpdateCanRestart(false);
@@ -1437,11 +1403,11 @@ export function SettingsView() {
               </div>
             </div>
           )}
-          {updateAssetName(updateInfo) && updateStatus === "available" && (
+          {updateAssetName(updateInfo) && (updateStatus === "available" || updateStatus === "downloading") && (
             <div className="mt-3 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-xs text-text-muted">
               <span className="min-w-0 truncate">{updateAssetName(updateInfo)}</span>
-              {formatBytes(updateInfo?.asset_size) && (
-                <span className="shrink-0 font-mono tabular-nums">{formatBytes(updateInfo?.asset_size)}</span>
+              {formatBytes(updateInfo?.asset_size || updateTotalBytes) && (
+                <span className="shrink-0 font-mono tabular-nums">{formatBytes(updateInfo?.asset_size || updateTotalBytes)}</span>
               )}
             </div>
           )}
@@ -1453,6 +1419,14 @@ export function SettingsView() {
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-[var(--color-subtle-bg)]">
                 <div className="h-full rounded-full bg-gradient-to-r from-accent to-info transition-[width] duration-300" style={{ width: `${updateProgress}%` }} />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 text-[0.7rem] text-text-muted">
+                <span className="font-mono tabular-nums">
+                  {formatBytes(updateDownloadedBytes) || "0 B"}{formatBytes(updateTotalBytes) ? ` / ${formatBytes(updateTotalBytes)}` : ""}
+                </span>
+                <span className="shrink-0 font-mono tabular-nums">
+                  {formatSpeed(updateSpeedBps) || "计算中"}
+                </span>
               </div>
             </div>
           )}
