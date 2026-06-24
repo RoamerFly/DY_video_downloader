@@ -1394,6 +1394,50 @@ export async function cancelCookieBrowserLogin(): Promise<{ success: boolean; me
   return invoke("cancel_cookie_browser_login");
 }
 
+export interface AccountInfo {
+  sec_uid: string;
+  nickname: string;
+  avatar_thumb: string;
+  cookie: string;
+}
+
+export async function getAccounts(): Promise<{ success: boolean; accounts: AccountInfo[]; current_sec_uid: string }> {
+  if (shouldUseBrowserBridge()) {
+    return requestJson("/api/accounts");
+  }
+  return invoke("get_accounts");
+}
+
+export async function switchAccount(secUid: string): Promise<{ success: boolean; message: string; nickname?: string }> {
+  if (shouldUseBrowserBridge()) {
+    return requestJson("/api/accounts/switch", {
+      method: "POST",
+      body: JSON.stringify({ sec_uid: secUid }),
+    });
+  }
+  return invoke("switch_account", { secUid, sec_uid: secUid });
+}
+
+export async function deleteAccount(secUid: string): Promise<{ success: boolean; message: string }> {
+  if (shouldUseBrowserBridge()) {
+    return requestJson("/api/accounts", {
+      method: "DELETE",
+      body: JSON.stringify({ sec_uid: secUid }),
+    });
+  }
+  return invoke("delete_account", { secUid, sec_uid: secUid });
+}
+
+export async function addAccount(cookie: string): Promise<{ success: boolean; message: string; nickname?: string; sec_uid?: string; avatar_thumb?: string }> {
+  if (shouldUseBrowserBridge()) {
+    return requestJson("/api/accounts/add", {
+      method: "POST",
+      body: JSON.stringify({ cookie }),
+    });
+  }
+  return invoke("add_account", { cookie });
+}
+
 type VerifyBrowserResponse = {
   success: boolean;
   message: string;

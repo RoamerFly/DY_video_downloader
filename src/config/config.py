@@ -73,6 +73,8 @@ class Config:
     COOKIE = ""
     RELATION_SIGNER = None
     CURRENT_USER_PROFILE = None
+    ACCOUNTS = []
+    CURRENT_SEC_UID = ""
     APP_VERSION = (os.environ.get("APP_VERSION") or os.environ.get("GITHUB_REF_NAME") or "1.0.26").lstrip("v")
 
     # 文件保存路径默认值
@@ -183,6 +185,8 @@ class Config:
 
         cls.HISTORY_DIRS = []
         cls.DOWNLOAD_DIR = cls.BASE_DIR
+        cls.ACCOUNTS = []
+        cls.CURRENT_SEC_UID = ""
         loaded_from_file = False
 
         # 先读取配置文件，再用环境变量覆盖，方便无界面部署和临时调试。
@@ -195,6 +199,8 @@ class Config:
                     cls.RELATION_SIGNER = relation_signer if isinstance(relation_signer, dict) else None
                     current_user_profile = config_data.get("current_user_profile")
                     cls.CURRENT_USER_PROFILE = current_user_profile if isinstance(current_user_profile, dict) else None
+                    cls.ACCOUNTS = config_data.get("accounts", [])
+                    cls.CURRENT_SEC_UID = config_data.get("current_sec_uid", "")
                     cls.BASE_DIR = config_data.get("base_dir", cls.BASE_DIR)
                     cls.DOWNLOAD_DIR = cls.BASE_DIR
                     cls.HISTORY_DIRS = cls.normalize_history_dirs(config_data.get("history_dirs", []))
@@ -268,6 +274,8 @@ class Config:
                     auto_create_folder=cls.AUTO_CREATE_FOLDER,
                     relation_signer=cls.RELATION_SIGNER,
                     current_user_profile=cls.CURRENT_USER_PROFILE,
+                    accounts=cls.ACCOUNTS,
+                    current_sec_uid=cls.CURRENT_SEC_UID,
                     im_friend_sec_user_ids=cls.IM_FRIEND_SEC_USER_IDS,
                     im_friend_include_all_users=cls.IM_FRIEND_INCLUDE_ALL_USERS,
                     im_friend_refresh_interval_seconds=cls.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
@@ -378,6 +386,8 @@ class Config:
         auto_create_folder=None,
         relation_signer=None,
         current_user_profile=None,
+        accounts=None,
+        current_sec_uid=None,
         im_friend_sec_user_ids=None,
         im_friend_include_all_users=None,
         im_friend_refresh_interval_seconds=None,
@@ -397,6 +407,8 @@ class Config:
             cls.FOLDER_NAME_TEMPLATE,
         )
         resolved_auto_create_folder = cls.AUTO_CREATE_FOLDER if auto_create_folder is None else bool(auto_create_folder)
+        resolved_accounts = accounts if accounts is not None else cls.ACCOUNTS
+        resolved_current_sec_uid = current_sec_uid if current_sec_uid is not None else cls.CURRENT_SEC_UID
         resolved_im_friend_sec_user_ids = cls.normalize_sec_user_ids(
             im_friend_sec_user_ids if im_friend_sec_user_ids is not None else cls.IM_FRIEND_SEC_USER_IDS
         )
@@ -431,6 +443,8 @@ class Config:
             "filename_template": resolved_filename_template,
             "folder_name_template": resolved_folder_name_template,
             "auto_create_folder": resolved_auto_create_folder,
+            "accounts": resolved_accounts,
+            "current_sec_uid": resolved_current_sec_uid,
             "im_friend_sec_user_ids": resolved_im_friend_sec_user_ids,
             "im_friend_include_all_users": resolved_im_friend_include_all_users,
             "im_friend_refresh_interval_seconds": resolved_im_friend_refresh_interval_seconds,
@@ -477,4 +491,3 @@ class Config:
             return False
         user_data_dir = get_user_data_dir()
         return user_data_dir == APP_EXEC_DIR
-

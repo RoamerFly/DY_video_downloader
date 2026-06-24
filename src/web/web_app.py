@@ -2154,6 +2154,8 @@ def get_config():
         'im_friend_include_all_users': getattr(Config, 'IM_FRIEND_INCLUDE_ALL_USERS', False),
         'im_friend_refresh_interval_seconds': getattr(Config, 'IM_FRIEND_REFRESH_INTERVAL_SECONDS', 30),
         'app_version': _get_current_app_version(),
+        'accounts': getattr(Config, 'ACCOUNTS', []),
+        'current_sec_uid': getattr(Config, 'CURRENT_SEC_UID', ''),
     })
 
 def _friend_chat_state_path() -> Path:
@@ -2367,6 +2369,8 @@ def set_config():
             filename_template=Config.FILENAME_TEMPLATE,
             folder_name_template=Config.FOLDER_NAME_TEMPLATE,
             auto_create_folder=Config.AUTO_CREATE_FOLDER,
+            accounts=Config.ACCOUNTS,
+            current_sec_uid=Config.CURRENT_SEC_UID,
             im_friend_sec_user_ids=Config.IM_FRIEND_SEC_USER_IDS,
             im_friend_include_all_users=Config.IM_FRIEND_INCLUDE_ALL_USERS,
             im_friend_refresh_interval_seconds=Config.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
@@ -2403,6 +2407,170 @@ def set_config():
 def get_app_version():
     """返回当前应用版本。"""
     return jsonify(_get_current_app_version())
+
+
+@app.route('/api/accounts', methods=['GET'])
+def get_accounts():
+    """获取所有账号信息"""
+    return jsonify({
+        'success': True,
+        'accounts': getattr(Config, 'ACCOUNTS', []),
+        'current_sec_uid': getattr(Config, 'CURRENT_SEC_UID', ''),
+    })
+
+
+@app.route('/api/accounts/switch', methods=['POST'])
+def switch_account():
+    """切换当前账号"""
+    try:
+        data = _request_json()
+        sec_uid = data.get('sec_uid')
+        if not sec_uid:
+            return jsonify({'success': False, 'message': '缺少必要参数 sec_uid'}), 400
+
+        accounts = getattr(Config, 'ACCOUNTS', [])
+        target_account = next((acc for acc in accounts if acc.get('sec_uid') == sec_uid), None)
+        if not target_account:
+            return jsonify({'success': False, 'message': '账号不存在'}), 404
+
+        Config.COOKIE = target_account.get('cookie', '')
+        Config.CURRENT_SEC_UID = sec_uid
+        Config.save_config(
+            Config.COOKIE,
+            Config.BASE_DIR,
+            Config.HISTORY_DIRS,
+            download_quality=Config.DOWNLOAD_QUALITY,
+            max_concurrent=Config.MAX_CONCURRENT,
+            filename_template=Config.FILENAME_TEMPLATE,
+            folder_name_template=Config.FOLDER_NAME_TEMPLATE,
+            auto_create_folder=Config.AUTO_CREATE_FOLDER,
+            relation_signer=Config.RELATION_SIGNER,
+            current_user_profile=Config.CURRENT_USER_PROFILE,
+            accounts=Config.ACCOUNTS,
+            current_sec_uid=Config.CURRENT_SEC_UID,
+            im_friend_sec_user_ids=Config.IM_FRIEND_SEC_USER_IDS,
+            im_friend_include_all_users=Config.IM_FRIEND_INCLUDE_ALL_USERS,
+            im_friend_refresh_interval_seconds=Config.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
+        )
+        init_app()
+        return jsonify({
+            'success': True,
+            'message': f"已切换为 {target_account.get('nickname')}",
+            'nickname': target_account.get('nickname'),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'切换账号失败: {str(e)}'}), 500
+
+
+@app.route('/api/accounts', methods=['DELETE'])
+def delete_account():
+    """删除账号"""
+    try:
+        data = _request_json()
+        sec_uid = data.get('sec_uid')
+        if not sec_uid:
+            return jsonify({'success': False, 'message': '缺少必要参数 sec_uid'}), 400
+
+        accounts = list(getattr(Config, 'ACCOUNTS', []))
+        new_accounts = [acc for acc in accounts if acc.get('sec_uid') != sec_uid]
+        if len(new_accounts) == len(accounts):
+            return jsonify({'success': False, 'message': '账号不存在'}), 404
+
+        Config.ACCOUNTS = new_accounts
+        if getattr(Config, 'CURRENT_SEC_UID', '') == sec_uid:
+            if new_accounts:
+                next_acc = new_accounts[0]
+                Config.COOKIE = next_acc.get('cookie', '')
+                Config.CURRENT_SEC_UID = next_acc.get('sec_uid', '')
+            else:
+                Config.COOKIE = ''
+                Config.CURRENT_SEC_UID = ''
+
+        Config.save_config(
+            Config.COOKIE,
+            Config.BASE_DIR,
+            Config.HISTORY_DIRS,
+            download_quality=Config.DOWNLOAD_QUALITY,
+            max_concurrent=Config.MAX_CONCURRENT,
+            filename_template=Config.FILENAME_TEMPLATE,
+            folder_name_template=Config.FOLDER_NAME_TEMPLATE,
+            auto_create_folder=Config.AUTO_CREATE_FOLDER,
+            relation_signer=Config.RELATION_SIGNER,
+            current_user_profile=Config.CURRENT_USER_PROFILE,
+            accounts=Config.ACCOUNTS,
+            current_sec_uid=Config.CURRENT_SEC_UID,
+            im_friend_sec_user_ids=Config.IM_FRIEND_SEC_USER_IDS,
+            im_friend_include_all_users=Config.IM_FRIEND_INCLUDE_ALL_USERS,
+            im_friend_refresh_interval_seconds=Config.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
+        )
+        init_app()
+        return jsonify({'success': True, 'message': '账号已删除'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'删除账号失败: {str(e)}'}), 500
+
+
+@app.route('/api/accounts/add', methods=['POST'])
+def add_account():
+    """手动添加账号"""
+    try:
+        data = _request_json()
+        cookie = data.get('cookie')
+        if not cookie:
+            return jsonify({'success': False, 'message': '缺少必要参数 cookie'}), 400
+
+        cookie = cookie.replace('\n', '').replace('\r', '').strip()
+        verify_result = _verify_native_cookie_login(cookie)
+        if not verify_result.get('success'):
+            return jsonify({
+                'success': False,
+                'message': verify_result.get('message') or 'Cookie 验证失败',
+                'need_login': verify_result.get('need_login', False),
+                'need_verify': verify_result.get('need_verify', False),
+            })
+
+        nickname = verify_result.get('nickname', '')
+        sec_uid = verify_result.get('sec_uid', '')
+        avatar_thumb = verify_result.get('avatar_thumb', '')
+
+        Config.COOKIE = cookie
+        Config.CURRENT_SEC_UID = sec_uid
+        accounts = list(getattr(Config, 'ACCOUNTS', []))
+        accounts = [account for account in accounts if account.get('sec_uid') != sec_uid]
+        accounts.append({
+            'sec_uid': sec_uid,
+            'nickname': nickname,
+            'avatar_thumb': avatar_thumb,
+            'cookie': cookie,
+        })
+        Config.ACCOUNTS = accounts
+
+        Config.save_config(
+            Config.COOKIE,
+            Config.BASE_DIR,
+            Config.HISTORY_DIRS,
+            download_quality=Config.DOWNLOAD_QUALITY,
+            max_concurrent=Config.MAX_CONCURRENT,
+            filename_template=Config.FILENAME_TEMPLATE,
+            folder_name_template=Config.FOLDER_NAME_TEMPLATE,
+            auto_create_folder=Config.AUTO_CREATE_FOLDER,
+            relation_signer=Config.RELATION_SIGNER,
+            current_user_profile=Config.CURRENT_USER_PROFILE,
+            accounts=Config.ACCOUNTS,
+            current_sec_uid=Config.CURRENT_SEC_UID,
+            im_friend_sec_user_ids=Config.IM_FRIEND_SEC_USER_IDS,
+            im_friend_include_all_users=Config.IM_FRIEND_INCLUDE_ALL_USERS,
+            im_friend_refresh_interval_seconds=Config.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
+        )
+        init_app()
+        return jsonify({
+            'success': True,
+            'message': f'成功添加并切换账号: {nickname}',
+            'nickname': nickname,
+            'sec_uid': sec_uid,
+            'avatar_thumb': avatar_thumb,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'添加账号失败: {str(e)}'}), 500
 
 
 @app.route('/api/check_update', methods=['GET'])
@@ -5853,12 +6021,42 @@ def _save_cookie_login_success(
             **(Config.CURRENT_USER_PROFILE if isinstance(Config.CURRENT_USER_PROFILE, dict) else {}),
             **current_user_profile,
         }
+    saved_profile = Config.CURRENT_USER_PROFILE if isinstance(Config.CURRENT_USER_PROFILE, dict) else {}
+    sec_uid = str(saved_profile.get('sec_uid') or '').strip()
+    account_nickname = str(nickname or saved_profile.get('nickname') or '').strip()
+    avatar_thumb = str(
+        saved_profile.get('avatar_thumb')
+        or saved_profile.get('avatar_medium')
+        or saved_profile.get('avatar_larger')
+        or ''
+    ).strip()
+    if sec_uid:
+        Config.CURRENT_SEC_UID = sec_uid
+        accounts = list(getattr(Config, 'ACCOUNTS', []) or [])
+        accounts = [account for account in accounts if account.get('sec_uid') != sec_uid]
+        accounts.append({
+            'sec_uid': sec_uid,
+            'nickname': account_nickname,
+            'avatar_thumb': avatar_thumb,
+            'cookie': cookie,
+        })
+        Config.ACCOUNTS = accounts
     Config.save_config(
         Config.COOKIE,
         Config.BASE_DIR,
         Config.HISTORY_DIRS,
+        download_quality=Config.DOWNLOAD_QUALITY,
+        max_concurrent=Config.MAX_CONCURRENT,
+        filename_template=Config.FILENAME_TEMPLATE,
+        folder_name_template=Config.FOLDER_NAME_TEMPLATE,
+        auto_create_folder=Config.AUTO_CREATE_FOLDER,
         relation_signer=Config.RELATION_SIGNER,
         current_user_profile=Config.CURRENT_USER_PROFILE,
+        accounts=Config.ACCOUNTS,
+        current_sec_uid=Config.CURRENT_SEC_UID,
+        im_friend_sec_user_ids=Config.IM_FRIEND_SEC_USER_IDS,
+        im_friend_include_all_users=Config.IM_FRIEND_INCLUDE_ALL_USERS,
+        im_friend_refresh_interval_seconds=Config.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
     )
     _stop_im_message_listener()
     init_app()
