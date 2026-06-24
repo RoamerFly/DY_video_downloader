@@ -15,6 +15,7 @@ if __name__ == '__main__':
     import socket
     import threading
     import time
+    import webbrowser
 
     # macOS 上跳过 gevent patch，避免与 Cocoa 运行循环冲突
     os.environ['USE_PYWEBVIEW'] = '1'
@@ -78,6 +79,11 @@ if __name__ == '__main__':
         def close(self):
             if self.window:
                 self.window.destroy()
+
+        def open_external_url(self, url):
+            target = str(url or '').strip()
+            if target.startswith(('http://', 'https://')):
+                webbrowser.open(target)
 
     # 查找可用端口
     port = find_free_port()

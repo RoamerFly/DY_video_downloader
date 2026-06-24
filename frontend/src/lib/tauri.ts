@@ -69,6 +69,9 @@ type BrowserSocket = {
   off: (event: string, listener: BrowserSocketListener) => void;
   connected?: boolean;
 };
+type PywebviewApi = {
+  open_external_url?: (url: string) => Promise<void> | void;
+};
 
 declare global {
   interface Window {
@@ -79,6 +82,9 @@ declare global {
       event?: {
         listen?: <T>(event: string, cb: (ev: { payload: T }) => void) => Promise<() => void>;
       };
+    };
+    pywebview?: {
+      api?: PywebviewApi;
     };
     io?: (options?: { transports?: string[] }) => BrowserSocket;
     SOCKET_TRANSPORTS?: string[];
@@ -1569,6 +1575,22 @@ export async function openFileLocation(path: string): Promise<void> {
     return;
   }
   return invoke("open_file_location", { path });
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const target = String(url || "").trim();
+  if (!target) return;
+
+  if (isTauriRuntime()) {
+    return invoke("open_external_url", { url: target });
+  }
+
+  if (window.pywebview?.api?.open_external_url) {
+    await window.pywebview.api.open_external_url(target);
+    return;
+  }
+
+  window.open(target, "_blank", "noopener,noreferrer");
 }
 
 export async function deleteFile(path: string): Promise<void> {
