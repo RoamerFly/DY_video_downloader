@@ -665,12 +665,8 @@ export function SettingsView() {
   };
 
   useEffect(() => {
-    if (cookieLoggedIn || loginStatus !== "idle") return;
-
     const trimmed = cookieValue.trim();
     if (!trimmed) {
-      lastCookieAttemptRef.current = "";
-      rejectedCookieRef.current = "";
       setCookieInputStatus("idle");
       return;
     }
@@ -681,17 +677,7 @@ export function SettingsView() {
 
     const status = getCookieInputStatus(trimmed);
     setCookieInputStatus(status);
-
-    if (status !== "valid" || savingCookie || trimmed === lastCookieAttemptRef.current) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void handleSaveCookie(trimmed);
-    }, 900);
-
-    return () => window.clearTimeout(timer);
-  }, [cookieValue, cookieLoggedIn, loginStatus, savingCookie]);
+  }, [cookieValue]);
 
   useEffect(() => {
     const nextPath = downloadPath.trim();
@@ -1061,31 +1047,44 @@ export function SettingsView() {
                   {/* Manual cookie input */}
                   {loginStatus === "idle" && (
                     <SettingGroup icon={Key} label="手动录入 Cookie">
-                      <div>
+                      <div className="space-y-3">
                         <Textarea
                           value={cookieValue}
                           onChange={(e) => setCookieValue(e.target.value)}
                           onBlur={handleValidateCookie}
-                          placeholder="从浏览器开发者工具复制抖音 Cookie..."
-                          rows={2}
+                          placeholder="从浏览器开发者工具复制抖音 Cookie并在此粘贴..."
+                          rows={2.5}
                           className="text-[0.76rem] font-mono leading-relaxed placeholder:text-[0.74rem]"
                         />
-                        {savingCookie ? (
-                          <p className="text-[0.68rem] text-info mt-1 flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> 正在自动保存并校验
-                          </p>
-                        ) : cookieInputStatus === "valid" ? (
-                          <p className="text-[0.68rem] text-success mt-1 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> 已检测到登录字段，将自动保存
-                          </p>
-                        ) : cookieInputStatus === "invalid" ? (
-                          <p className="text-[0.68rem] text-danger mt-1 flex items-center gap-1">
-                            <XCircle className="w-3 h-3" />
-                            Cookie 校验未通过，请确认包含必要参数如 sessionid
-                          </p>
-                        ) : null}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            {savingCookie ? (
+                              <p className="text-[0.68rem] text-info flex items-center gap-1">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> 正在校验并登录...
+                              </p>
+                            ) : cookieInputStatus === "valid" ? (
+                              <p className="text-[0.68rem] text-success flex items-center gap-1 font-semibold">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> 格式校验通过
+                              </p>
+                            ) : cookieInputStatus === "invalid" ? (
+                              <p className="text-[0.68rem] text-danger flex items-center gap-1">
+                                <XCircle className="w-3.5 h-3.5" /> 需包含必要参数 sessionid
+                              </p>
+                            ) : null}
+                          </div>
+                          
+                          <Button
+                            onClick={() => void handleSaveCookie(cookieValue)}
+                            disabled={savingCookie || !cookieValue.trim() || cookieInputStatus === "invalid"}
+                            className="h-8.5 rounded-[8px] text-[0.76rem] font-bold px-4 cursor-pointer shrink-0"
+                          >
+                            确认添加
+                          </Button>
+                        </div>
                         {loginMessage && (
-                          <p className="mt-1 text-[0.68rem] text-text-muted">{loginMessage}</p>
+                          <p className="text-[0.68rem] text-text-muted mt-1 leading-relaxed bg-white/[0.02] p-2 rounded-[6px] border border-white/[0.04]">
+                            {loginMessage}
+                          </p>
                         )}
                       </div>
                     </SettingGroup>
