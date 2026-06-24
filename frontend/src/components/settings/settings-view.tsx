@@ -1225,6 +1225,11 @@ export function SettingsView() {
                           <SelectItem value="auto">自动</SelectItem>
                           <SelectItem value="highest">最高质量</SelectItem>
                           <SelectItem value="h264">兼容优先 (H.264)</SelectItem>
+                          <SelectItem value="4k">4K</SelectItem>
+                          <SelectItem value="2k">2K</SelectItem>
+                          <SelectItem value="1080p">1080P</SelectItem>
+                          <SelectItem value="720p">720P</SelectItem>
+                          <SelectItem value="480p">480P</SelectItem>
                           <SelectItem value="smallest">最小体积</SelectItem>
                         </SelectContent>
                       </Select>
