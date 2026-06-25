@@ -2160,6 +2160,9 @@ def get_config():
     })
 
 def _friend_chat_state_path() -> Path:
+    current_uid = getattr(Config, 'CURRENT_SEC_UID', '')
+    if current_uid:
+        return Path(Config.CONFIG_FILE).with_name(f'friend_chat_state_{current_uid}.json')
     return Path(Config.CONFIG_FILE).with_name('friend_chat_state.json')
 
 
@@ -5567,6 +5570,7 @@ def set_user_followed_api():
             'success': True,
             'user_id': user_id,
             'is_follow': follow,
+            'follow_status': result.get('follow_status', 1 if follow else 0),
             'message': '关注成功' if follow else '已取消关注',
         })
     except Exception as e:
