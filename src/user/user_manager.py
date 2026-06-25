@@ -792,6 +792,10 @@ class DouyinUserManager:
             }
         result = resp.get('user', {}) if succ else {}
         if succ and isinstance(result, dict) and result:
+            # follow_status: 0=未关注, 1=已关注, 2=互相关注
+            # is_follow 可能在 user 对象内不存在，用 follow_status 补全
+            if not result.get('is_follow') and resp.get('follow_status', 0):
+                result['is_follow'] = True
             self._user_detail_cache[user_id] = dict(result)
         return result
 
