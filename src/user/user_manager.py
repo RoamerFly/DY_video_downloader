@@ -1654,6 +1654,7 @@ class DouyinUserManager:
             'success': True,
             'user_id': user_id,
             'is_follow': follow,
+            'follow_status': int(resp.get('follow_status', 0)) if isinstance(resp, dict) else (1 if follow else 0),
             'raw': resp,
             'message': '关注成功' if follow else '已取消关注',
         }
