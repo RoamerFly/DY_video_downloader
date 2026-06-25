@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useAppStore, useLogStore, useAlertStore } from "@/stores/app-store";
+import { useAppStore, useLogStore, useAlertStore, useUpdateStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,16 +58,6 @@ import type { AccountInfo } from "@/lib/tauri";
 import type { ThemeMode } from "@/types";
 
 type LoginStatus = "idle" | "starting" | "waiting" | "success" | "error" | "cancelled";
-type UpdateStatus = "idle" | "checking" | "available" | "none" | "downloading" | "ready" | "error";
-type UpdateInfo = {
-  version?: string;
-  current_version?: string;
-  notes?: string;
-  asset_name?: string;
-  asset_size?: number;
-  install_mode?: string;
-  portable?: boolean;
-};
 type SettingsField =
   | "theme"
   | "download_path"
@@ -164,13 +154,13 @@ export function SettingsView() {
     theme,
   });
 
-  // Update state
+  // Update state — read from global store so background progress is visible
   const [appVersion, setAppVersion] = useState("");
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
-  const [updateMessage, setUpdateMessage] = useState("");
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [updateProgress, setUpdateProgress] = useState(0);
-  const [updateCanRestart, setUpdateCanRestart] = useState(false);
+  const updateStatus = useUpdateStore((s) => s.status);
+  const updateMessage = useUpdateStore((s) => s.message);
+  const updateInfo = useUpdateStore((s) => s.info);
+  const updateProgress = useUpdateStore((s) => s.progress);
+  const updateCanRestart = useUpdateStore((s) => s.canRestart);
 
   const cleanup = useCallback(() => {
     if (countdownRef.current) {
@@ -248,44 +238,8 @@ export function SettingsView() {
     };
   }, [cleanup, setCookieLoggedIn, loadAccounts]);
 
-  useEffect(() => {
-    let disposed = false;
-    let removeProgress: (() => void) | null = null;
-    let removeFinished: (() => void) | null = null;
-    let removeError: (() => void) | null = null;
-
-    const setup = async () => {
-      removeProgress = await listenEvent<{ progress?: number; downloaded?: number; total?: number }>(
-        "update-download-progress",
-        (payload) => {
-          if (disposed) return;
-          if (typeof payload.progress === "number") {
-            setUpdateProgress(Math.max(0, Math.min(100, payload.progress)));
-          }
-        }
-      );
-      removeFinished = await listenEvent("update-download-finished", () => {
-        if (disposed) return;
-        setUpdateStatus("ready");
-        setUpdateProgress(100);
-        setUpdateMessage((current) => current || "更新已下载");
-      });
-      removeError = await listenEvent<{ message?: string }>("update-download-error", (payload) => {
-        if (disposed) return;
-        setUpdateStatus("error");
-        setUpdateMessage(payload.message || "更新下载失败");
-      });
-    };
-
-    void setup();
-
-    return () => {
-      disposed = true;
-      removeProgress?.();
-      removeFinished?.();
-      removeError?.();
-    };
-  }, []);
+  // Note: update event listeners are handled globally in App.tsx via useUpdateStore.
+  // No duplicate listeners needed here — the store subscriptions above pick up changes.
 
   const startLogin = async (cookie?: string) => {
     setLoginStatus("starting");
@@ -722,18 +676,19 @@ export function SettingsView() {
   }, [folderNameTemplate, autoCreateFolder, savingFields.folder_name_template]);
 
   const handleCheckUpdate = async () => {
-    setUpdateStatus("checking");
-    setUpdateMessage("正在检查更新...");
+    const store = useUpdateStore.getState();
+    store.setStatus("checking");
+    store.setMessage("正在检查更新...");
     try {
       const result = await checkUpdate();
       if (!result.success) {
-        setUpdateStatus("error");
-        setUpdateMessage(result.message || "检查更新失败");
+        store.setStatus("error");
+        store.setMessage(result.message || "检查更新失败");
         return;
       }
       if (result.has_update) {
-        setUpdateStatus("available");
-        setUpdateInfo({
+        store.setStatus("available");
+        store.setInfo({
           version: result.version,
           current_version: result.current_version,
           notes: result.notes,
@@ -742,23 +697,24 @@ export function SettingsView() {
           install_mode: result.install_mode,
           portable: result.portable,
         });
-        setUpdateCanRestart(false);
-        setUpdateMessage(`发现新版本 ${result.version || ""}`.trim());
+        store.setCanRestart(false);
+        store.setMessage(`发现新版本 ${result.version || ""}`.trim());
       } else {
-        setUpdateStatus("none");
-        setUpdateInfo(null);
-        setUpdateCanRestart(false);
-        setUpdateMessage("当前已是最新版本");
+        store.setStatus("none");
+        store.setInfo(null);
+        store.setCanRestart(false);
+        store.setMessage("当前已是最新版本");
       }
     } catch (error) {
-      setUpdateStatus("error");
-      setUpdateMessage(error instanceof Error ? error.message : "检查更新失败");
+      store.setStatus("error");
+      store.setMessage(error instanceof Error ? error.message : "检查更新失败");
     }
   };
 
   const handleDownloadUpdate = async () => {
-    setUpdateStatus("downloading");
-    setUpdateProgress(0);
+    const store = useUpdateStore.getState();
+    store.setStatus("downloading");
+    store.resetProgress();
     try {
       const result = await downloadUpdate();
       if (!result.success) {
@@ -766,15 +722,15 @@ export function SettingsView() {
       }
       const autoClosing = result.message.includes("自动关闭");
       if (!autoClosing) {
-        setUpdateStatus("ready");
+        store.setStatus("ready");
       }
-      setUpdateCanRestart(!autoClosing && Boolean(result.restart_required ?? true));
-      setUpdateMessage(result.message || "更新下载完成");
-      setUpdateProgress(100);
+      store.setCanRestart(!autoClosing && Boolean(result.restart_required ?? true));
+      store.setMessage(result.message || "更新下载完成");
+      store.setProgress({ progress: 100, speed_bps: 0 });
     } catch (error) {
-      setUpdateStatus("error");
-      setUpdateCanRestart(false);
-      setUpdateMessage(error instanceof Error ? error.message : "更新下载失败");
+      store.setStatus("error");
+      store.setCanRestart(false);
+      store.setMessage(error instanceof Error ? error.message : "更新下载失败");
     }
   };
 
