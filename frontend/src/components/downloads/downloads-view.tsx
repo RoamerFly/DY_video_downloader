@@ -1418,6 +1418,7 @@ function buildDownloadPlayerVideo(items: HistoryItem[]): VideoInfo | null {
       aweme_count: 0,
       favoriting_count: 0,
       is_follow: false,
+      follow_status: 0,
       verify_status: 0,
       unique_id: "",
     },

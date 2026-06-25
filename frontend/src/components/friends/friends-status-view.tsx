@@ -982,6 +982,7 @@ export function FriendsStatusView() {
         aweme_count: 0,
         favoriting_count: 0,
         is_follow: false,
+        follow_status: 0,
         sec_uid: friend.secUid,
         unique_id: "",
         verify_status: 0,

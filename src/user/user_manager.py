@@ -110,6 +110,7 @@ class DouyinUserManager:
             'avatar_medium',
             'avatar_larger',
             'is_follow',
+            'follow_status',
             'verify_status',
         ):
             if detail.get(key) and not user_info.get(key):
