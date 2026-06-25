@@ -525,7 +525,7 @@ def _search_user_payload(user_info: dict, item: dict | None = None) -> dict:
         'avatar_thumb': _avatar_url(user_info, 'avatar_thumb', 'avatar_100x100', 'avatar_168x168', 'avatar_medium', 'avatar_300x300', 'avatar_larger'),
         'avatar_medium': _avatar_url(user_info, 'avatar_medium', 'avatar_168x168', 'avatar_300x300', 'avatar_larger', 'avatar_thumb', 'avatar_100x100'),
         'avatar_larger': _avatar_url(user_info, 'avatar_larger', 'avatar_300x300', 'avatar_medium', 'avatar_168x168', 'avatar_thumb', 'avatar_100x100'),
-        'is_follow': bool(user_info.get('is_follow', False)),
+        'is_follow': bool(user_info.get('is_follow', False)) or bool(user_info.get('follow_status', 0)),
         'verify_status': _count_value(user_info.get('verify_status'), 0),
     }
 
