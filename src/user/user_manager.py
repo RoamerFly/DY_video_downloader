@@ -28,6 +28,33 @@ class DouyinUserManager:
             downloader_type = "Standard"
             print(f"\033[94m[UserManager] 调试模式已启用，使用 {downloader_type} 下载器\033[0m")
 
+    @staticmethod
+    def _looks_like_login_error(error) -> bool:
+        text = str(error or '').lower()
+        return any(
+            token in text
+            for token in (
+                '用户未登录',
+                '未登录',
+                '请先登录',
+                '请先设置cookie',
+                'cookie 为空',
+                '登录态',
+                '重新登录',
+                'not login',
+                'not logged in',
+                'login required',
+                'session expired',
+            )
+        )
+
+    @staticmethod
+    def _login_required_message(feature: str) -> dict:
+        return {
+            '_need_login': True,
+            'message': f'请登录后获取{feature}',
+        }
+
     def _count_value(self, value, default: int = 0) -> int:
         if isinstance(value, bool):
             return default
@@ -1477,6 +1504,8 @@ class DouyinUserManager:
                 print(f"\033[91m[UserManager] 获取点赞视频时出错: {e}\033[0m")
             else:
                 print(f"\033[91m获取点赞视频时出错: {e}\033[0m")
+            if self._looks_like_login_error(e):
+                return self._login_required_message('点赞视频')
             return []
 
     def _build_collection_video_item(self, post):
@@ -1711,6 +1740,8 @@ class DouyinUserManager:
         except Exception as e:
             if self.debug_mode:
                 print(f"\033[91m[UserManager] 获取收藏视频时出错: {e}\033[0m")
+            if self._looks_like_login_error(e):
+                return self._login_required_message('收藏视频')
             return {'_error': True, 'message': f'获取收藏视频失败: {e}'}
 
     async def get_collected_mixes(self, count=20, cursor=0):
@@ -1774,6 +1805,8 @@ class DouyinUserManager:
         except Exception as e:
             if self.debug_mode:
                 print(f"\033[91m[UserManager] 获取收藏合集时出错: {e}\033[0m")
+            if self._looks_like_login_error(e):
+                return self._login_required_message('收藏合集')
             return {'_error': True, 'message': f'获取收藏合集失败: {e}'}
 
     async def get_mix_videos(self, series_id, count=20, cursor=0):

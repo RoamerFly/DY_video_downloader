@@ -71,12 +71,15 @@ export function Sidebar() {
         if (res.current_sec_uid) {
           const activeAcc = res.accounts?.find((a) => a.sec_uid === res.current_sec_uid);
           setActiveAccount(activeAcc || null);
+          useAppStore.getState().setCookieLoggedIn(Boolean(activeAcc), activeAcc?.nickname, activeAcc?.sec_uid);
         } else {
           setActiveAccount(null);
+          useAppStore.getState().setCookieLoggedIn(false);
         }
       } else {
         setActiveAccount(null);
         setAccounts([]);
+        useAppStore.getState().setCookieLoggedIn(false);
       }
     } catch (e) {
       console.error("加载边栏头像失败", e);
@@ -219,7 +222,7 @@ export function Sidebar() {
                             const res = await switchAccount(acc.sec_uid);
                             if (res.success) {
                               toast.success(`已切换为: ${res.nickname}`, "切换成功");
-                              useAppStore.getState().setCookieLoggedIn(true, res.nickname);
+                              useAppStore.getState().setCookieLoggedIn(true, res.nickname, acc.sec_uid);
                               await initClient().catch(() => {});
                               await fetchActiveAccount();
                             } else {

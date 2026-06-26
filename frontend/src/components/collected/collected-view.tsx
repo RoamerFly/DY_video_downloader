@@ -118,8 +118,12 @@ function CollectedVideosPanel() {
   const { downloadVideo, downloadBatch } = useDownloads();
   const addLog = useLogStore((s) => s.addLog);
   const cookieLoggedIn = useAppStore((s) => s.cookieLoggedIn);
+  const currentSecUid = useAppStore((s) => s.currentSecUid);
   const openUser = useSearchStore((s) => s.openUser);
-  const [videos, setVideos] = useState<VideoInfo[]>(() => loadCollectedVideosCache());
+  const [videos, setVideos] = useState<VideoInfo[]>(() => {
+    const scope = useAppStore.getState().currentSecUid;
+    return scope ? loadCollectedVideosCache(scope) : [];
+  });
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -145,8 +149,10 @@ function CollectedVideosPanel() {
       if (!result.success) {
         const message = result.message || "获取收藏视频失败";
         if (result.need_login) {
+          setVideos([]);
           setError(message);
           setInitialized(true);
+          setCursor(0);
           setHasMore(false);
           addLog(message, "warning");
           return;
@@ -169,7 +175,7 @@ function CollectedVideosPanel() {
       const incoming = result.data || [];
       setVideos((current) => {
         const next = reset ? incoming : uniqueVideos(current, incoming);
-        saveCollectedVideosCache(next);
+        saveCollectedVideosCache(next, currentSecUid);
         return next;
       });
       setCursor(result.cursor || 0);
@@ -185,11 +191,19 @@ function CollectedVideosPanel() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [addLog, cursor, loading, loadingMore]);
+  }, [addLog, currentSecUid, cursor, loading, loadingMore]);
 
   useEffect(() => {
     if (!initialized && !loading) void loadVideos(true);
   }, [initialized, loadVideos, loading]);
+
+  useEffect(() => {
+    setVideos(currentSecUid ? loadCollectedVideosCache(currentSecUid) : []);
+    setInitialized(false);
+    setCursor(0);
+    setHasMore(true);
+    setError(null);
+  }, [currentSecUid]);
 
   useEffect(() => {
     if (!hasMore || loading || loadingMore || videos.length === 0) return;
@@ -309,7 +323,11 @@ function CollectedVideosPanel() {
 
 function CollectedMixesPanel() {
   const addLog = useLogStore((s) => s.addLog);
-  const [mixes, setMixes] = useState<CollectedMixItem[]>(() => loadCollectedMixesCache());
+  const currentSecUid = useAppStore((s) => s.currentSecUid);
+  const [mixes, setMixes] = useState<CollectedMixItem[]>(() => {
+    const scope = useAppStore.getState().currentSecUid;
+    return scope ? loadCollectedMixesCache(scope) : [];
+  });
   const [selectedMix, setSelectedMix] = useState<CollectedMixItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -333,8 +351,10 @@ function CollectedMixesPanel() {
       if (!result.success) {
         const message = result.message || "获取收藏合集失败";
         if (result.need_login) {
+          setMixes([]);
           setError(message);
           setInitialized(true);
+          setCursor(0);
           setHasMore(false);
           addLog(message, "warning");
           return;
@@ -356,7 +376,7 @@ function CollectedMixesPanel() {
       const incoming = result.data || [];
       setMixes((current) => {
         const next = reset ? incoming : uniqueMixes(current, incoming);
-        saveCollectedMixesCache(next);
+        saveCollectedMixesCache(next, currentSecUid);
         return next;
       });
       setCursor(result.cursor || 0);
@@ -372,11 +392,20 @@ function CollectedMixesPanel() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [addLog, cursor, loading, loadingMore]);
+  }, [addLog, currentSecUid, cursor, loading, loadingMore]);
 
   useEffect(() => {
     if (!initialized && !loading && !selectedMix) void loadMixes(true);
   }, [initialized, loadMixes, loading, selectedMix]);
+
+  useEffect(() => {
+    setMixes(currentSecUid ? loadCollectedMixesCache(currentSecUid) : []);
+    setSelectedMix(null);
+    setInitialized(false);
+    setCursor(0);
+    setHasMore(true);
+    setError(null);
+  }, [currentSecUid]);
 
   useEffect(() => {
     if (selectedMix || !hasMore || loading || loadingMore || mixes.length === 0) return;
@@ -762,6 +791,8 @@ function InlineWarning({ message }: { message: string }) {
 }
 
 function ErrorState({ message }: { message: string }) {
+  const setView = useAppStore((s) => s.setView);
+  const needsLogin = /请登录后获取|请先设置\s*Cookie|未登录/.test(message);
   return (
     <motion.div
       initial={false}
@@ -773,6 +804,17 @@ function ErrorState({ message }: { message: string }) {
       </div>
       <h3 className="mb-2 text-[1rem] font-bold text-danger">读取失败</h3>
       <p className="max-w-[360px] text-[0.78rem] text-text-secondary">{message}</p>
+      {needsLogin && (
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => setView("settings")}
+          className="mt-6 rounded-[10px]"
+        >
+          <Key className="mr-2 h-3.5 w-3.5" />
+          去登录
+        </Button>
+      )}
     </motion.div>
   );
 }

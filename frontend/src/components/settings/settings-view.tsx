@@ -121,7 +121,7 @@ export function SettingsView() {
         setCurrentSecUid(res.current_sec_uid || "");
         const active = res.accounts?.find((a) => a.sec_uid === res.current_sec_uid);
         if (active) {
-          setCookieLoggedIn(true, active.nickname);
+          setCookieLoggedIn(true, active.nickname, active.sec_uid);
         } else {
           // Fallback if no active found but accounts exist
           setCookieLoggedIn(false);
@@ -382,7 +382,7 @@ export function SettingsView() {
       if (!result.success) {
         throw new Error(result.message || "添加账号失败");
       }
-      setCookieLoggedIn(true, result.nickname);
+      setCookieLoggedIn(true, result.nickname, result.sec_uid);
       setCookieInputStatus("valid");
       setLoginMessage(result.message || "账号添加成功并激活");
       addLog(`成功添加并切换账号: ${result.nickname}`, "success");

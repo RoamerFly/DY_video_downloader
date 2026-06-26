@@ -99,6 +99,18 @@ function isTauriRuntime() {
 }
 
 function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return invokeWithCookieInvalidEvent(command, args, true);
+}
+
+function invokeLocal<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return invokeWithCookieInvalidEvent(command, args, false);
+}
+
+function invokeWithCookieInvalidEvent<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  emitCookieInvalidEvent: boolean
+): Promise<T> {
   const tauriInvoke = window.__TAURI__?.core?.invoke;
 
   if (!tauriInvoke) {
@@ -107,11 +119,15 @@ function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> 
 
   return tauriInvoke<T>(command, args)
     .then((result) => {
-      emitCookieInvalidIfNeeded(result);
+      if (emitCookieInvalidEvent) {
+        emitCookieInvalidIfNeeded(result);
+      }
       return result;
     })
     .catch((error) => {
-      emitCookieInvalidFromError(error);
+      if (emitCookieInvalidEvent) {
+        emitCookieInvalidFromError(error);
+      }
       throw error;
     });
 }
@@ -138,6 +154,25 @@ function emitCookieInvalidFromError(error: unknown) {
 
 function isCookieInvalidMessage(message: string) {
   return /用户未登录|未登录|请先登录|请先设置\s*Cookie|登录态|重新登录|not login|not logged in|login required|session expired/i.test(message);
+}
+
+function normalizeFeatureLoginResponse<T>(
+  result: T,
+  feature: "点赞视频" | "收藏视频" | "收藏合集"
+): T {
+  if (!result || typeof result !== "object") return result;
+  const data = result as Record<string, unknown>;
+  if (data.success !== false) return result;
+
+  const rawMessage = String(data.message || "").trim();
+  if (!data.need_login && !isCookieInvalidMessage(rawMessage)) return result;
+
+  return {
+    ...data,
+    need_login: true,
+    need_verify: false,
+    message: `请登录后获取${feature}`,
+  } as T;
 }
 
 let browserSocket: BrowserSocket | null = null;
@@ -1054,27 +1089,28 @@ export async function getLikedVideos(
     const result = await requestJson<LikedVideosResponse & { data?: unknown[] }>("/api/get_liked_videos", {
       method: "POST",
       body: JSON.stringify({ count, sec_uid: secUid, cursor }),
+      suppressCookieInvalidEvent: true,
     });
-    return {
+    return normalizeFeatureLoginResponse({
       ...result,
       data: Array.isArray(result.data)
         ? (result.data.map(normalizeLikedVideo).filter(Boolean) as VideoInfo[])
         : [],
-    };
+    }, "点赞视频");
   }
-  const result = await invoke<LikedVideosResponse & { data?: unknown[] }>("get_liked_videos", {
+  const result = await invokeLocal<LikedVideosResponse & { data?: unknown[] }>("get_liked_videos", {
     count,
     secUid,
     sec_uid: secUid,
     cursor,
   });
 
-  return {
+  return normalizeFeatureLoginResponse({
     ...result,
     data: Array.isArray(result.data)
       ? (result.data.map(normalizeLikedVideo).filter(Boolean) as VideoInfo[])
       : [],
-  };
+  }, "点赞视频");
 }
 
 export async function getLikedAuthors(count: number): Promise<LikedAuthorsResponse> {
@@ -1100,24 +1136,25 @@ export async function getCollectedVideos(cursor: number, count: number): Promise
     const result = await requestJson<CollectedVideosResponse & { data?: unknown[] }>("/api/get_collected_videos", {
       method: "POST",
       body: JSON.stringify({ cursor, count }),
+      suppressCookieInvalidEvent: true,
     });
-    return {
+    return normalizeFeatureLoginResponse({
       ...result,
       data: Array.isArray(result.data)
         ? (result.data.map(normalizeLikedVideo).filter(Boolean) as VideoInfo[])
         : [],
-    };
+    }, "收藏视频");
   }
-  const result = await invoke<CollectedVideosResponse & { data?: unknown[] }>("get_collected_videos", {
+  const result = await invokeLocal<CollectedVideosResponse & { data?: unknown[] }>("get_collected_videos", {
     cursor,
     count,
   });
-  return {
+  return normalizeFeatureLoginResponse({
     ...result,
     data: Array.isArray(result.data)
       ? (result.data.map(normalizeLikedVideo).filter(Boolean) as VideoInfo[])
       : [],
-  };
+  }, "收藏视频");
 }
 
 export async function getCollectedMixes(cursor: number, count: number): Promise<CollectedMixesResponse> {
@@ -1125,20 +1162,21 @@ export async function getCollectedMixes(cursor: number, count: number): Promise<
     const result = await requestJson<CollectedMixesResponse & { data?: CollectedMixItem[] }>("/api/get_collected_mixes", {
       method: "POST",
       body: JSON.stringify({ cursor, count }),
+      suppressCookieInvalidEvent: true,
     });
-    return {
+    return normalizeFeatureLoginResponse({
       ...result,
       data: Array.isArray(result.data) ? result.data : [],
-    };
+    }, "收藏合集");
   }
-  const result = await invoke<CollectedMixesResponse & { data?: CollectedMixItem[] }>("get_collected_mixes", {
+  const result = await invokeLocal<CollectedMixesResponse & { data?: CollectedMixItem[] }>("get_collected_mixes", {
     cursor,
     count,
   });
-  return {
+  return normalizeFeatureLoginResponse({
     ...result,
     data: Array.isArray(result.data) ? result.data : [],
-  };
+  }, "收藏合集");
 }
 
 export async function getMixVideos(seriesId: string, cursor: number, count: number): Promise<MixVideosResponse> {
