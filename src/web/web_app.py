@@ -133,9 +133,6 @@ from src.user.user_manager import DouyinUserManager
 # 移除增强下载器支持
 ENHANCED_DOWNLOADER_AVAILABLE = False
 EnhancedDouyinDownloader = None
-_native_verify_window = None
-_native_verify_window_session = None
-VERIFY_COOKIE_SYNC_TIMEOUT = 10 * 60
 
 app = Flask(__name__, static_folder=None)
 app.config['SECRET_KEY'] = 'better_douyin_secret_key'
@@ -997,42 +994,6 @@ def init_app():
         logger.error(f"Web应用初始化失败: {str(e)}")
 
 
-@app.route('/')
-def index():
-    """主页"""
-    react_index = get_react_dist_dir() / 'index.html'
-    if react_index.exists():
-        return send_file(react_index)
-    logger.error("React frontend build not found at %s", react_index)
-    return Response(
-        """
-        <!doctype html>
-        <html lang="zh-CN">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>better-douyin</title>
-            <style>
-              body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0b11; color: #f5f5f7; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-              main { width: min(680px, calc(100vw - 40px)); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; padding: 24px; background: rgba(255,255,255,.05); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
-              h1 { margin: 0 0 12px; font-size: 20px; }
-              p { margin: 0 0 14px; color: #b8b8c5; line-height: 1.7; }
-              code { display: inline-block; padding: 3px 7px; border-radius: 8px; background: rgba(255,255,255,.08); color: #fff; }
-            </style>
-          </head>
-          <body>
-            <main>
-              <h1>React 前端尚未构建</h1>
-              <p>Python 版现在只使用 React 前端。请先在项目根目录执行：</p>
-              <p><code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code></p>
-              <p>构建完成后重新启动应用。</p>
-            </main>
-          </body>
-        </html>
-        """,
-        status=503,
-        mimetype='text/html',
-    )
 
 
 # 配置与好友聊天状态路由已抽离到 src/web/config_routes.py
@@ -1103,159 +1064,6 @@ app.register_blueprint(download_history_bp)
 from src.web.media_proxy import media_proxy_bp, setup_media_proxy
 app.register_blueprint(media_proxy_bp)
 
-@app.route('/api/verify_page')
-def verify_page():
-    """返回一个验证页面，用iframe嵌入抖音来完成滑块验证"""
-    return '''<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>抖音验证</title>
-<style>
-body{margin:0;background:#0a0a0f;color:#fff;font-family:'Outfit',sans-serif;display:flex;flex-direction:column;height:100vh}
-.header{padding:16px 24px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:space-between}
-.header h3{margin:0;font-size:1.1rem}
-.header .hint{color:#8b8b9e;font-size:0.82rem}
-iframe{flex:1;border:none;width:100%}
-.btn-done{background:#FE2C55;color:#fff;border:none;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer;font-weight:500}
-.btn-done:hover{background:#ff4d73}
-</style></head><body>
-<div class="header">
-    <div>
-        <h3>请完成滑块验证</h3>
-        <div class="hint">在下方页面完成验证后点击"验证完成"</div>
-    </div>
-    <button class="btn-done" onclick="window.close()">验证完成</button>
-</div>
-<iframe src="https://www.douyin.com/"></iframe>
-</body></html>'''
-
-
-def _start_native_verify_cookie_sync(window):
-    """持续读取验证窗口 Cookie，滑块验证写入新 Cookie 后同步到后端请求层。"""
-    global _native_verify_window_session
-
-    if not window:
-        return
-
-    active_session = _native_verify_window_session
-    if active_session and active_session.is_active() and active_session.window is window:
-        return
-    if active_session and active_session.is_active():
-        active_session.close()
-
-    session = NativeCookieLoginSession(window=window)
-    session.last_cookie_value = Config.COOKIE or ''
-    session.last_core_cookie_signature = _core_login_cookie_signature(Config.COOKIE or '')
-    _native_verify_window_session = session
-
-    def finish() -> None:
-        global _native_verify_window_session
-        session.finished_event.set()
-        if _native_verify_window_session is session:
-            _native_verify_window_session = None
-
-    def poll_verify_window_cookies() -> None:
-        try:
-            if not session.window.events.loaded.wait(45):
-                logger.debug('验证窗口加载超时，停止 Cookie 同步')
-                return
-
-            while True:
-                if session.cancel_event.is_set() or session.window.events.closed.is_set():
-                    return
-                if time.monotonic() - session.created_at >= VERIFY_COOKIE_SYNC_TIMEOUT:
-                    logger.debug('验证窗口 Cookie 同步超时，停止监听')
-                    return
-
-                try:
-                    raw_cookies = session.window.get_cookies() or []
-                except Exception as error:
-                    logger.debug('读取验证窗口 Cookie 失败: %s', error)
-                    time.sleep(1)
-                    continue
-
-                entries = normalize_cookie_entries(raw_cookies)
-                if not has_login_cookie(entries):
-                    time.sleep(1)
-                    continue
-
-                cookie_string = serialize_cookie_entries(entries)
-                if not cookie_string:
-                    time.sleep(1)
-                    continue
-
-                core_signature = _core_login_cookie_signature(cookie_string)
-                current_config_signature = _core_login_cookie_signature(Config.COOKIE or '')
-                if not core_signature:
-                    time.sleep(1)
-                    continue
-
-                if (
-                    core_signature == getattr(session, 'last_core_cookie_signature', ())
-                    or core_signature == current_config_signature
-                ):
-                    time.sleep(1)
-                    continue
-
-                session.last_cookie_value = cookie_string
-                session.last_core_cookie_signature = core_signature
-                _save_cookie_login_success(cookie_string)
-                logger.info('验证窗口 Cookie 已同步到后端')
-                time.sleep(2)
-        finally:
-            finish()
-
-    threading.Thread(target=poll_verify_window_cookies, daemon=True).start()
-
-@app.route('/api/open_verify_browser', methods=['POST'])
-def open_verify_browser():
-    """打开抖音验证页面，只使用应用内 pywebview 窗口并注入当前 Cookie。"""
-    global _native_verify_window
-
-    try:
-        data = _request_json()
-        target_url = (data.get('target_url') or '').strip() or 'https://www.douyin.com/'
-
-        if not is_native_cookie_login_available():
-            import webbrowser
-            webbrowser.open(target_url)
-            return jsonify({
-                'success': True,
-                'message': '已在系统浏览器中打开验证页面，请完成验证',
-                'open_url': target_url,
-            })
-
-        if _native_verify_window and not _native_verify_window.events.closed.is_set():
-            try:
-                _native_verify_window.load_url(target_url)
-                if Config.COOKIE:
-                    apply_cookie_to_window(
-                        _native_verify_window,
-                        Config.COOKIE,
-                        reload_after_apply=True,
-                        force=True,
-                        post_load_delay=0.8,
-                    )
-                _start_native_verify_cookie_sync(_native_verify_window)
-                _native_verify_window.show()
-                return jsonify({'success': True, 'message': '验证窗口已打开，请完成验证', 'open_url': target_url})
-            except Exception:
-                _native_verify_window = None
-
-        verify_window = create_native_douyin_window('抖音验证', target_url, width=1100, height=750)
-        _native_verify_window = verify_window
-        if Config.COOKIE:
-            apply_cookie_to_window(
-                verify_window,
-                Config.COOKIE,
-                reload_after_apply=True,
-                force=True,
-                post_load_delay=0.2,
-            )
-        _start_native_verify_cookie_sync(verify_window)
-        return jsonify({'success': True, 'message': '已打开验证窗口，请完成验证', 'open_url': target_url})
-
-    except Exception as e:
-        logger.error(f"打开验证窗口失败：{str(e)}")
-        return jsonify({'success': False, 'message': f'无法打开验证窗口：{str(e)}'}), 500
 
 # 用户数据查询路由已抽离到 src/web/user_queries.py
 # setup_user_queries 调用移到文件末尾，确保所有 helper 已定义
@@ -1346,44 +1154,6 @@ setup_comments(
 )
 app.register_blueprint(comments_bp)
 
-@app.route('/api/verify_cookie', methods=['GET'])
-def verify_cookie():
-    """校验当前保存的 Cookie 是否可用。"""
-    cookie = (Config.COOKIE or '').strip()
-    if not cookie:
-        return jsonify({
-            'valid': False,
-            'user_name': None,
-            'user_id': None,
-            'sec_uid': None,
-            'expires_at': None,
-            'message': '未配置 Cookie',
-        })
-
-    result = _verify_native_cookie_login(cookie)
-    if result.get('success'):
-        return jsonify({
-            'valid': True,
-            'user_name': result.get('nickname') or None,
-            'user_id': result.get('user_id') or result.get('sec_uid') or None,
-            'sec_uid': result.get('sec_uid') or None,
-            'avatar_thumb': result.get('avatar_thumb') or None,
-            'avatar_medium': result.get('avatar_medium') or None,
-            'avatar_larger': result.get('avatar_larger') or None,
-            'expires_at': None,
-            'message': 'Cookie 可用',
-        })
-
-    return jsonify({
-        'valid': False,
-        'user_name': None,
-        'user_id': None,
-        'sec_uid': None,
-        'expires_at': None,
-        'need_login': bool(result.get('need_login')),
-        'need_verify': bool(result.get('need_verify')),
-        'message': result.get('message') or 'Cookie 不可用',
-    })
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
@@ -1833,6 +1603,21 @@ def main():
 
     # 阻塞主线程，等待服务线程结束
     server_thread.join()
+
+
+# 主页 / 验证页面 / Cookie 校验路由已抽离到 src/web/verify_routes.py
+from src.web.verify_routes import verify_routes_bp, setup_verify_routes
+
+setup_verify_routes(
+    logger=logger,
+    Config=Config,
+    request_json=_request_json,
+    get_react_dist_dir=get_react_dist_dir,
+    verify_native_cookie_login=_verify_native_cookie_login,
+    core_login_cookie_signature=_core_login_cookie_signature,
+    save_cookie_login_success=_save_cookie_login_success,
+)
+app.register_blueprint(verify_routes_bp)
 
 
 # 模块加载完成后注入媒体代理模块的依赖（部分 helper 定义在文件后段）
