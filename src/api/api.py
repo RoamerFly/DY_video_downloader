@@ -1,7 +1,4 @@
 import asyncio
-import requests
-import requests.adapters
-import urllib3.util.retry
 import urllib.parse
 import urllib.request
 import os
@@ -12,7 +9,6 @@ import binascii
 import sys
 import random
 import string
-import threading
 import time
 import hmac
 import hashlib
@@ -20,74 +16,18 @@ import logging
 import uuid
 from src.api import sign as douyin_sign
 from src.api import douyin_im_proto
+from src.api.http_client import (
+    api_get as _api_get,
+    api_post as _api_post,
+    api_post_stateless as _api_post_stateless,
+    get_api_session as _get_api_session,
+    redact_headers as _redact_headers,
+    redact_params as _redact_params,
+    sign_spider_a_bogus as _sign_spider_a_bogus,
+    splice_params as _splice_params,
+)
 
 logger = logging.getLogger('api')
-
-# Configure a session with retry/SSL resilience
-_retry = urllib3.util.retry.Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-_thread_local = threading.local()
-
-
-def _splice_params(params: dict) -> str:
-    parts = []
-    for key, value in params.items():
-        if value is None:
-            value = ''
-        parts.append(f'{key}={urllib.parse.quote(str(value))}')
-    return '&'.join(parts)
-
-
-def _sign_spider_a_bogus(query: str, data: str) -> str:
-    """Pure Python Douyin_Spider signer for endpoints whose body participates in a_bogus."""
-    return douyin_sign.sign_spider_publish(query, data)
-
-
-def _create_api_session():
-    session = requests.Session()
-    session.mount('https://', requests.adapters.HTTPAdapter(max_retries=_retry))
-    return session
-
-
-def _get_api_session():
-    session = getattr(_thread_local, 'api_session', None)
-    if session is None:
-        session = _create_api_session()
-        _thread_local.api_session = session
-    return session
-
-
-def _api_get(*args, **kwargs):
-    return _get_api_session().get(*args, **kwargs)
-
-
-def _api_post(*args, **kwargs):
-    return _get_api_session().post(*args, **kwargs)
-
-
-def _api_post_stateless(*args, **kwargs):
-    session = _create_api_session()
-    try:
-        return session.post(*args, **kwargs)
-    finally:
-        session.close()
-
-
-def _redact_headers(headers: dict) -> dict:
-    redacted = dict(headers or {})
-    for key in list(redacted.keys()):
-        if key.lower() in ('cookie', 'authorization'):
-            redacted[key] = '<redacted>'
-    return redacted
-
-
-def _redact_params(params: dict) -> dict:
-    redacted = dict(params or {})
-    for key in ('msToken', 'a_bogus', 'verifyFp', 'fp', 'webid', 'uifid'):
-        if key in redacted:
-            redacted[key] = '<redacted>'
-    return redacted
-
-
 
 class DouyinAPI:
     """抖音API封装类"""
@@ -2625,12 +2565,10 @@ class DouyinAPI:
         if not logged_in:
             return self._build_login_required_error(current_user if isinstance(current_user, dict) else None), False
 
-        session = getattr(_thread_local, 'api_session', None)
-        if session is not None:
-            try:
-                session.cookies.clear()
-            except Exception:
-                pass
+        try:
+            _get_api_session().cookies.clear()
+        except Exception:
+            pass
 
         uri = '/aweme/v1/web/comment/publish'
         url = f'https://www.douyin.com{uri}'
