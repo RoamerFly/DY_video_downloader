@@ -16,22 +16,24 @@ import { LikedView } from "@/components/liked/liked-view";
 import { CollectedView } from "@/components/collected/collected-view";
 import { FriendsStatusView } from "@/components/friends/friends-status-view";
 import { AnimatePresence, motion } from "framer-motion";
-import { easeConfig } from "@/lib/utils";
+import { cn, easeConfig } from "@/lib/utils";
 
 export function AppShell() {
   const currentView = useAppStore((s) => s.currentView);
   const commandOpen = useAppStore((s) => s.commandOpen);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isPyWebView = typeof window !== "undefined" && Boolean((window as any).pywebview);
+  const isTauri = typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__);
   const isWindows = typeof navigator !== "undefined" && /Win/i.test(navigator.platform || "");
   const isMacOS = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || "");
+  const needsTopInset = (isPyWebView || isTauri) && isWindows && !isMacOS;
 
   useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [currentView]);
 
   return (
-    <div className="relative flex h-screen w-screen overflow-hidden">
+    <div className={cn("relative flex h-screen w-screen overflow-hidden", needsTopInset && "shadow-[inset_0_0_0_1px_var(--color-border)]")}>
       <WindowControls />
       {/* Sidebar */}
       <Sidebar />
@@ -48,7 +50,7 @@ export function AppShell() {
             } as React.CSSProperties & { WebkitAppRegion: string }}
           />
         )}
-        <div ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto pb-16">
+        <div ref={scrollRef} className={cn("flex-1 overflow-x-hidden overflow-y-auto pb-16", needsTopInset && "pt-9")}>
           <AnimatePresence initial={false} mode="wait">
             {renderView(currentView)}
           </AnimatePresence>
