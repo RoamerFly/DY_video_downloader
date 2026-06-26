@@ -154,6 +154,8 @@ if __name__ == '__main__':
             native_window.setTitlebarAppearsTransparent_(True)
             native_window.setTitleVisibility_(AppKit.NSWindowTitleHidden)
             native_window.setMovableByWindowBackground_(True)
+            native_window.setOpaque_(False)
+            native_window.setBackgroundColor_(AppKit.NSColor.clearColor())
             native_window.setStyleMask_(
                 native_window.styleMask() | AppKit.NSWindowStyleMaskFullSizeContentView
             )
@@ -163,7 +165,9 @@ if __name__ == '__main__':
                 native_window.setTitlebarSeparatorStyle_(AppKit.NSTitlebarSeparatorStyleNone)
             content_view = native_window.contentView()
             if content_view is not None:
-                content_view.setFrame_(native_window.contentLayoutRect())
+                window_frame = native_window.frame()
+                full_bounds = AppKit.NSMakeRect(0, 0, window_frame.size.width, window_frame.size.height)
+                content_view.setFrame_(full_bounds)
                 content_view.setAutoresizingMask_(
                     AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
                 )
@@ -171,6 +175,11 @@ if __name__ == '__main__':
                 layer = content_view.layer()
                 if layer is not None:
                     layer.setMasksToBounds_(False)
+                for subview in content_view.subviews():
+                    subview.setFrame_(content_view.bounds())
+                    subview.setAutoresizingMask_(
+                        AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
+                    )
             # 确保三个系统按键可见
             for button_kind in (
                 AppKit.NSWindowCloseButton,
@@ -207,11 +216,11 @@ if __name__ == '__main__':
     window.events.closing += on_closing
 
     if IS_MACOS:
-        window.events.shown += lambda: threading.Timer(
-            0.1,
-            configure_macos_native_window,
-            args=(window,),
-        ).start()
+        def configure_macos_window_after_show():
+            for delay in (0.1, 0.5, 1.2):
+                threading.Timer(delay, configure_macos_native_window, args=(window,)).start()
+
+        window.events.shown += configure_macos_window_after_show
 
     # 在主线程启动pywebview（阻塞），debug模式查看控制台错误
     webview.start()
