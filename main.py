@@ -90,9 +90,10 @@ if __name__ == '__main__':
             WindowAPI._maximized = not WindowAPI._maximized
 
         def close(self):
-            w = self._get_window()
-            if w:
-                w.destroy()
+            # 直接强制退出，避免 WebView2 evaluate_js 回传阻塞（约 1s）
+            # w.destroy() 会触发 js_bridge_call 的 _call() 继续执行 evaluate_js，
+            # 而此时 WebView2 正在销毁，信号量永远无法释放，导致约 1s 的超时等待。
+            os._exit(0)
 
         def open_external_url(self, url):
             target = str(url or '').strip()
