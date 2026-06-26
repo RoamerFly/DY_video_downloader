@@ -180,41 +180,48 @@ if __name__ == '__main__':
                     subview.setAutoresizingMask_(
                         AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
                     )
-            # 确保三个系统按键可见
-            traffic_buttons = [
-                native_window.standardWindowButton_(AppKit.NSWindowCloseButton),
-                native_window.standardWindowButton_(AppKit.NSWindowMiniaturizeButton),
-                native_window.standardWindowButton_(AppKit.NSWindowZoomButton),
-            ]
-            visible_buttons = [button for button in traffic_buttons if button is not None]
-            for button in visible_buttons:
-                button.setHidden_(False)
-                button.setEnabled_(True)
-                button.setAlphaValue_(1.0)
-                button.setAutoresizingMask_(0)
+            for button_kind in (
+                AppKit.NSWindowCloseButton,
+                AppKit.NSWindowMiniaturizeButton,
+                AppKit.NSWindowZoomButton,
+            ):
+                button = native_window.standardWindowButton_(button_kind)
+                if button is not None:
+                    button.setHidden_(False)
+                    button.setEnabled_(True)
+                    button.setAlphaValue_(1.0)
+        except Exception:
+            pass
 
-            if len(visible_buttons) == 3:
-                close_button, minimize_button, zoom_button = visible_buttons
-                close_frame = close_button.frame()
-                minimize_frame = minimize_button.frame()
-                spacing = minimize_frame.origin.x - close_frame.origin.x
-                if spacing <= 0:
-                    spacing = close_frame.size.width + 8
-                for index, button in enumerate((close_button, minimize_button, zoom_button)):
-                    frame = button.frame()
-                    frame.origin.x = close_frame.origin.x + spacing * index
-                    frame.origin.y = close_frame.origin.y
-                    button.setFrame_(frame)
-                    button.superview().addSubview_(button)
+    def patch_macos_pywebview_overlay():
+        """Apply the overlay titlebar after pywebview mounts WKWebView as contentView."""
+        if not IS_MACOS:
+            return
+        try:
+            import webview.platforms.cocoa as cocoa
+            original = cocoa.BrowserView.BrowserDelegate.webView_didFinishNavigation_
+            if getattr(original, '_better_douyin_patched', False):
+                return
+
+            def patched(self, webview, nav):
+                result = original(self, webview, nav)
+                try:
+                    configure_macos_native_window(webview.pywebview_window)
+                except Exception:
+                    pass
+                return result
+
+            patched._better_douyin_patched = True
+            cocoa.BrowserView.BrowserDelegate.webView_didFinishNavigation_ = patched
         except Exception:
             pass
 
     window_api = WindowAPI()
     window_options = {}
-    if IS_WINDOWS or IS_MACOS:
+    if IS_WINDOWS:
         window_options['frameless'] = True
-    # Mac 也走 pywebview 的 frameless 分支，才能在创建时启用 FullSizeContentView；
-    # 随后用 AppKit 把系统红黄绿按钮恢复显示，避免自定义窗口按钮。
+    # Mac 使用系统标题栏按钮；通过 Cocoa overlay patch 让内容延伸到标题栏下方。
+    patch_macos_pywebview_overlay()
 
     # 创建pywebview窗口
     window = webview.create_window(
