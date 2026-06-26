@@ -1,8 +1,7 @@
 """应用更新与目录选择路由。
 
-从 web_app.py 抽离。模块内部依赖通过 setup 注入；更新相关的辅助函数
-（_fetch_updater_metadata、_select_update_asset、_stage_self_update 等）
-仍保留在 web_app.py，运行时通过延迟导入访问。
+从 web_app.py 抽离。更新相关的辅助函数位于 src/web/updater.py，
+目录选择对话框辅助函数内联在本模块中。
 """
 from __future__ import annotations
 
@@ -13,9 +12,11 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from flask import Blueprint, jsonify
+
+from src.web import updater
 
 update_routes_bp = Blueprint("update_routes", __name__)
 
@@ -48,10 +49,19 @@ def setup_update_routes(
     _get_current_app_version = get_current_app_version
 
 
-def _web_app():
-    """延迟读取 web_app 模块以访问更新辅助函数。"""
-    from src.web import web_app
-    return web_app
+def _dialog_cancelled(result: subprocess.CompletedProcess[str]) -> bool:
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip().lower()
+    if stdout:
+        return False
+    if not stderr and result.returncode in (0, 1):
+        return True
+    return any(token in stderr for token in ("cancel", "canceled", "cancelled", "user canceled", "user cancelled"))
+
+
+def _dialog_error_message(result: subprocess.CompletedProcess[str], fallback: str) -> str:
+    stderr = (result.stderr or "").strip()
+    return stderr or fallback
 
 
 @update_routes_bp.route('/api/get_app_version', methods=['GET'])
@@ -63,34 +73,33 @@ def get_app_version():
 @update_routes_bp.route('/api/check_update', methods=['GET'])
 def check_update():
     """检查 GitHub Releases 上是否有新版本。"""
-    web_app = _web_app()
     current_version = _get_current_app_version()
 
     try:
-        metadata = web_app._fetch_updater_metadata()
+        metadata = updater.fetch_updater_metadata()
 
         release = None
         if not metadata:
             try:
-                release = web_app._fetch_latest_release()
+                release = updater.fetch_latest_release()
             except Exception as exc:
                 _logger.debug(f"Fetch latest release failed: {exc}")
 
-        latest_version = web_app._normalize_version_text(
+        latest_version = updater.normalize_version_text(
             (metadata or {}).get('version') or
             (release or {}).get('tag_name') or
             (release or {}).get('name') or
             ''
         )
-        has_update = bool(latest_version) and web_app._is_newer_version(latest_version, current_version)
-        asset = web_app._select_update_asset(release or {}, metadata)
+        has_update = bool(latest_version) and updater.is_newer_version(latest_version, current_version)
+        asset = updater.select_update_asset(release or {}, metadata)
 
         return jsonify({
             'success': True,
             'has_update': has_update,
             'current_version': current_version,
             'version': latest_version or current_version,
-            'notes': web_app._normalize_update_notes((metadata or {}).get('notes') or (release or {}).get('body')) or '暂无更新说明',
+            'notes': updater.normalize_update_notes((metadata or {}).get('notes') or (release or {}).get('body')) or '暂无更新说明',
             'html_url': (release or {}).get('html_url') or _LATEST_RELEASE_PAGE_URL,
             'download_url': asset.get('url'),
             'asset_name': asset.get('name'),
@@ -112,36 +121,35 @@ def check_update():
 @update_routes_bp.route('/api/download_update', methods=['GET'])
 def download_update():
     """在应用内下载对应平台的发布资源，并打开安装包或所在目录。"""
-    web_app = _web_app()
     try:
-        metadata = web_app._fetch_updater_metadata()
+        metadata = updater.fetch_updater_metadata()
 
         release = None
         if not metadata:
             try:
-                release = web_app._fetch_latest_release()
+                release = updater.fetch_latest_release()
             except Exception as exc:
                 _logger.debug(f"Fetch latest release failed: {exc}")
 
         current_version = _get_current_app_version()
-        latest_version = web_app._normalize_version_text(
+        latest_version = updater.normalize_version_text(
             (metadata or {}).get('version') or
             (release or {}).get('tag_name') or
             (release or {}).get('name') or
             _get_current_app_version()
         )
-        if latest_version and not web_app._is_newer_version(latest_version, current_version):
+        if latest_version and not updater.is_newer_version(latest_version, current_version):
             return jsonify({
                 'success': False,
                 'message': '当前已是最新版本'
             }), 409
 
-        asset = web_app._select_update_asset(release or {}, metadata)
+        asset = updater.select_update_asset(release or {}, metadata)
         download_url = str(asset.get('url') or '')
 
         if not download_url or asset.get('install_mode') == 'browser':
             target_url = download_url or str((release or {}).get('html_url') or _LATEST_RELEASE_PAGE_URL)
-            if not web_app._open_external_target(target_url):
+            if not updater.open_external_target(target_url):
                 return jsonify({
                     'success': False,
                     'message': '无法打开下载页面，请手动前往 Releases 页面'
@@ -154,7 +162,7 @@ def download_update():
                 'message': '未找到匹配安装包，已打开 Releases 页面'
             })
 
-        file_path = web_app._download_update_asset(
+        file_path = updater.download_update_asset(
             download_url,
             str(asset.get('name') or ''),
             latest_version,
@@ -164,8 +172,8 @@ def download_update():
         install_mode = str(asset.get('install_mode') or 'download')
 
         try:
-            staged = web_app._stage_self_update(file_path, install_mode)
-            web_app._schedule_app_exit_for_update()
+            staged = updater.stage_self_update(file_path, install_mode)
+            updater.schedule_app_exit_for_update()
             return jsonify({
                 'success': True,
                 'mode': 'auto_install',
@@ -180,14 +188,14 @@ def download_update():
         except Exception as install_error:
             _logger.warning(f"自动安装更新不可用，回退为打开更新包: {install_error}")
 
-        opened = web_app._open_update_file(file_path, install_mode)
+        opened = updater.open_update_file(file_path, install_mode)
 
-        web_app._emit_update_event('update_download_finished', {
+        updater.emit_update_event('update_download_finished', {
             'file_path': str(file_path),
             'install_mode': install_mode,
             'opened': opened,
             'restart_required': False,
-            'message': web_app._update_download_message(file_path, install_mode, opened),
+            'message': updater.update_download_message(file_path, install_mode, opened),
         })
 
         return jsonify({
@@ -198,10 +206,10 @@ def download_update():
             'restart_required': False,
             'download_url': download_url,
             'file_path': str(file_path),
-            'message': web_app._update_download_message(file_path, install_mode, opened),
+            'message': updater.update_download_message(file_path, install_mode, opened),
         })
     except Exception as e:
-        web_app._emit_update_event('update_download_error', {'message': str(e)})
+        updater.emit_update_event('update_download_error', {'message': str(e)})
         _logger.error(f"打开更新下载失败: {e}")
         return jsonify({'success': False, 'message': f'更新下载失败: {str(e)}'}), 500
 
@@ -240,7 +248,6 @@ def restart_app():
 @update_routes_bp.route('/api/select_directory', methods=['POST'])
 def select_directory():
     """打开系统文件夹选择器，返回用户选择的路径"""
-    web_app = _web_app()
     try:
         initial_dir = _Config.BASE_DIR or os.path.expanduser('~')
 
@@ -267,9 +274,9 @@ def select_directory():
 
             if directory:
                 return jsonify({'success': True, 'path': directory})
-            if web_app._dialog_cancelled(result):
+            if _dialog_cancelled(result):
                 return jsonify({'success': False, 'message': '用户取消选择'})
-            raise RuntimeError(web_app._dialog_error_message(result, '选择目录失败'))
+            raise RuntimeError(_dialog_error_message(result, '选择目录失败'))
 
         if not _IS_MACOS:
             if shutil.which('zenity'):
@@ -281,9 +288,9 @@ def select_directory():
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return jsonify({'success': True, 'path': result.stdout.strip()})
-                if web_app._dialog_cancelled(result):
+                if _dialog_cancelled(result):
                     return jsonify({'success': False, 'message': '用户取消选择'})
-                raise RuntimeError(web_app._dialog_error_message(result, '选择目录失败'))
+                raise RuntimeError(_dialog_error_message(result, '选择目录失败'))
 
             if shutil.which('kdialog'):
                 result = subprocess.run(
@@ -294,9 +301,9 @@ def select_directory():
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return jsonify({'success': True, 'path': result.stdout.strip()})
-                if web_app._dialog_cancelled(result):
+                if _dialog_cancelled(result):
                     return jsonify({'success': False, 'message': '用户取消选择'})
-                raise RuntimeError(web_app._dialog_error_message(result, '选择目录失败'))
+                raise RuntimeError(_dialog_error_message(result, '选择目录失败'))
 
             return jsonify({'success': False, 'message': '当前系统缺少目录选择器，请安装 zenity 或 kdialog'})
 
@@ -319,9 +326,9 @@ def select_directory():
         if result.returncode == 0 and result.stdout.strip():
             directory = result.stdout.strip()
             return jsonify({'success': True, 'path': directory})
-        if web_app._dialog_cancelled(result):
+        if _dialog_cancelled(result):
             return jsonify({'success': False, 'message': '用户取消选择'})
-        raise RuntimeError(web_app._dialog_error_message(result, '选择目录失败'))
+        raise RuntimeError(_dialog_error_message(result, '选择目录失败'))
     except subprocess.TimeoutExpired:
         _logger.warning("选择目录超时")
         return jsonify({'success': False, 'message': '选择目录超时，请重试'}), 504
