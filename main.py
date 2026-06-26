@@ -3,12 +3,10 @@
 
 import sys
 import os
-import multiprocessing
-
-# PyInstaller 打包时需要调用这个方法以防在双击执行时进入多进程递归死循环
-multiprocessing.freeze_support()
 
 if sys.platform == 'win32':
+    import multiprocessing
+    multiprocessing.freeze_support()
     import asyncio
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -27,10 +25,11 @@ if __name__ == '__main__':
     # macOS 上跳过 gevent patch，避免与 Cocoa 运行循环冲突
     os.environ['USE_PYWEBVIEW'] = '1'
 
-    from flask_server import run_flask_process
-
     IS_MACOS = sys.platform == 'darwin'
     IS_WINDOWS = sys.platform == 'win32'
+
+    if IS_WINDOWS:
+        from flask_server import run_flask_process
 
     def find_free_port(start=5001, end=5010):
         """查找可用端口"""
@@ -104,12 +103,10 @@ if __name__ == '__main__':
     port = find_free_port()
 
     # 启动 Flask 服务
-    # Windows: 独立子进程（避免 WebView2 GIL 竞争导致窗口卡死）
-    # Mac/Linux: 线程（Cocoa 与 GIL 协作良好，且子进程会在 Dock 显示多个图标）
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    _flask_exit_event = multiprocessing.Event()
-
     if IS_WINDOWS:
+        import multiprocessing
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        _flask_exit_event = multiprocessing.Event()
         flask_proc = multiprocessing.Process(
             target=run_flask_process, args=(port, project_root, _flask_exit_event), daemon=True
         )
@@ -121,11 +118,10 @@ if __name__ == '__main__':
         _exit_watcher = threading.Thread(target=_watch_flask_exit, daemon=True)
         _exit_watcher.start()
     else:
-        # Mac/Linux: 线程启动，避免多进程在 Dock 显示多个图标
-        from src.web.web_app import start_server, set_main_process_exit_event
-        set_main_process_exit_event(_flask_exit_event)
+        # Mac/Linux: 线程（不引入 multiprocessing，避免创建子进程在 Dock 显示多余图标）
+        from src.web.web_app import start_server as _flask_start_server
         flask_thread = threading.Thread(
-            target=start_server, kwargs={'port': port}, daemon=True
+            target=_flask_start_server, kwargs={'port': port}, daemon=True
         )
         flask_thread.start()
 

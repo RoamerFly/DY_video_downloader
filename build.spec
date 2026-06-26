@@ -54,6 +54,10 @@ hiddenimports = [
     'src.web',
     'src.web.web_app',
     'src.api.native_cookie_login',
+    'src.web.web_app',
+    'src.web.react_dist',
+    'src.utils',
+    'flask_server',
     'webview',
     'webview.platforms',
     'webview.platforms.cocoa',
@@ -87,9 +91,14 @@ if sys.platform == 'win32':
     except ImportError:
         print("[build.spec] Warning: pythonnet not installed")
 
+# 收集 src 包的所有子模块（PyInstaller 无法自动分析 gevent 条件导入的模块）
+from PyInstaller.utils.hooks import collect_submodules
+src_submodules = collect_submodules('src')
+hiddenimports.extend(src_submodules)
+
 a = Analysis(
     ['main.py'],
-    pathex=[project_root],
+    pathex=[project_root, os.path.join(project_root, 'src')],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

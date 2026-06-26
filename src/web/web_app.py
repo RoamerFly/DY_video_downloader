@@ -5,7 +5,8 @@ IS_WINDOWS = platform.system().lower() == 'windows'
 IS_MACOS = platform.system().lower() == 'darwin'
 
 # macOS + pywebview 时跳过 gevent patch，避免与 Cocoa 运行循环冲突
-if not IS_WINDOWS and not (IS_MACOS and os.environ.get('USE_PYWEBVIEW') == '1'):
+# 也跳过 PyInstaller 分析阶段（避免 monkey.patch_all 破坏模块分析）
+if not IS_WINDOWS and not (IS_MACOS and os.environ.get('USE_PYWEBVIEW') == '1') and 'PYINSTALLER_CONFIGDIR' not in os.environ:
     from gevent import monkey
     monkey.patch_all()
 
@@ -6340,26 +6341,27 @@ def _start_native_cookie_login(timeout: int, old_cookie: str = None) -> tuple[bo
                     report_event("login_timeout", "登录超时")
                     return
 
-                try:
-                    # Run get_cookies in a thread with timeout to avoid blocking
-                    # the close event processing on Windows WebView2
-                    cookie_result = [None]
-                    cookie_error = [None]
-                    def _fetch_cookies():
-                        try:
-                            cookie_result[0] = session.window.get_cookies() or []
-                        except Exception as e:
-                            cookie_error[0] = e
-                    t = threading.Thread(target=_fetch_cookies, daemon=True)
-                    t.start()
-                    t.join(timeout=2.0)
-                    if t.is_alive():
-                        # get_cookies is stuck (e.g. window closing), check closed flag
-                        time.sleep(poll_interval)
-                        continue
-                    if cookie_error[0]:
-                        raise cookie_error[0]
-                    raw_cookies = cookie_result[0]
+                # Run get_cookies in a thread with timeout to avoid blocking
+                # the close event processing on Windows WebView2
+                cookie_result = [None]
+                cookie_error = [None]
+                def _fetch_cookies():
+                    try:
+                        cookie_result[0] = session.window.get_cookies() or []
+                    except Exception as e:
+                        cookie_error[0] = e
+                t = threading.Thread(target=_fetch_cookies, daemon=True)
+                t.start()
+                t.join(timeout=2.0)
+                if t.is_alive():
+                    # get_cookies is stuck (e.g. window closing), check closed flag
+                    time.sleep(poll_interval)
+                    continue
+                if cookie_error[0]:
+                    logger.debug('读取原生登录窗口 Cookie 失败: %s', cookie_error[0])
+                    time.sleep(poll_interval)
+                    continue
+                raw_cookies = cookie_result[0]
 
                 entries = normalize_cookie_entries(raw_cookies)
                 if not has_login_cookie(entries):
