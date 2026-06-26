@@ -88,7 +88,6 @@ export const useLikedStore = create<LikedStoreState>((set, get) => ({
       if (!result.success) {
         const message = result.message || "获取点赞视频失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           set({
             loadingVideos: false,
             videosLoaded: true,
@@ -183,7 +182,6 @@ export const useLikedStore = create<LikedStoreState>((set, get) => ({
       if (!result.success) {
         const message = result.message || "加载更多点赞视频失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           set({ loadingMoreVideos: false, videosError: message });
           addLog(message, "warning");
           return;
@@ -246,7 +244,6 @@ export const useLikedStore = create<LikedStoreState>((set, get) => ({
       if (!result.success) {
         const message = result.message || "获取点赞作者失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           set({
             loadingAuthors: false,
             authorsLoaded: true,

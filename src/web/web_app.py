@@ -3809,7 +3809,7 @@ def get_liked_videos_api():
                 return jsonify({
                     'success': False,
                     'need_login': True,
-                    'message': '获取点赞视频需要登录，请先在设置中登录抖音账号',
+                    'message': '请登录后获取点赞视频',
                 })
             if result.get('_need_verify'):
                 return jsonify(_verify_error_response_without_login_check(result, '获取点赞视频失败，请完成验证后重试'))
@@ -3908,7 +3908,7 @@ def get_collected_videos_api():
                 return jsonify({
                     'success': False,
                     'need_login': True,
-                    'message': '获取收藏视频需要登录，请先在设置中登录抖音账号',
+                    'message': '请登录后获取收藏视频',
                 })
             if result.get('_need_verify'):
                 return jsonify(_verify_error_response_without_login_check(result, '获取收藏视频失败，请完成验证后重试'))
@@ -3945,7 +3945,7 @@ def get_collected_mixes_api():
                 return jsonify({
                     'success': False,
                     'need_login': True,
-                    'message': '获取收藏合集需要登录，请先在设置中登录抖音账号',
+                    'message': '请登录后获取收藏合集',
                 })
             if result.get('_need_verify'):
                 return jsonify(_verify_error_response_without_login_check(result, '获取收藏合集失败，请完成验证后重试'))

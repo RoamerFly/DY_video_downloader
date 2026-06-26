@@ -145,7 +145,6 @@ function CollectedVideosPanel() {
       if (!result.success) {
         const message = result.message || "获取收藏视频失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           setError(message);
           setInitialized(true);
           setHasMore(false);
@@ -334,7 +333,6 @@ function CollectedMixesPanel() {
       if (!result.success) {
         const message = result.message || "获取收藏合集失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           setError(message);
           setInitialized(true);
           setHasMore(false);
@@ -461,7 +459,6 @@ function MixVideosPanel({ mix, onBack }: { mix: CollectedMixItem; onBack: () => 
       if (!result.success) {
         const message = result.message || "获取合集视频失败";
         if (result.need_login) {
-          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
           setError(message);
           setInitialized(true);
           setHasMore(false);
