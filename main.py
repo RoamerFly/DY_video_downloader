@@ -181,16 +181,31 @@ if __name__ == '__main__':
                         AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
                     )
             # 确保三个系统按键可见
-            for button_kind in (
-                AppKit.NSWindowCloseButton,
-                AppKit.NSWindowMiniaturizeButton,
-                AppKit.NSWindowZoomButton,
-            ):
-                button = native_window.standardWindowButton_(button_kind)
-                if button is not None:
-                    button.setHidden_(False)
-                    button.setEnabled_(True)
-                    button.setAlphaValue_(1.0)
+            traffic_buttons = [
+                native_window.standardWindowButton_(AppKit.NSWindowCloseButton),
+                native_window.standardWindowButton_(AppKit.NSWindowMiniaturizeButton),
+                native_window.standardWindowButton_(AppKit.NSWindowZoomButton),
+            ]
+            visible_buttons = [button for button in traffic_buttons if button is not None]
+            for button in visible_buttons:
+                button.setHidden_(False)
+                button.setEnabled_(True)
+                button.setAlphaValue_(1.0)
+                button.setAutoresizingMask_(0)
+
+            if len(visible_buttons) == 3:
+                close_button, minimize_button, zoom_button = visible_buttons
+                close_frame = close_button.frame()
+                minimize_frame = minimize_button.frame()
+                spacing = minimize_frame.origin.x - close_frame.origin.x
+                if spacing <= 0:
+                    spacing = close_frame.size.width + 8
+                for index, button in enumerate((close_button, minimize_button, zoom_button)):
+                    frame = button.frame()
+                    frame.origin.x = close_frame.origin.x + spacing * index
+                    frame.origin.y = close_frame.origin.y
+                    button.setFrame_(frame)
+                    button.superview().addSubview_(button)
         except Exception:
             pass
 
