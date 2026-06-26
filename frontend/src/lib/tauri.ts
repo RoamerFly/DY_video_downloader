@@ -1276,9 +1276,10 @@ export async function getFriendOnlineStatus(
         conv_ids: convIds,
         convIds,
       }),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("get_friend_online_status", {
+  return invokeLocal("get_friend_online_status", {
     secUserIds,
     sec_user_ids: secUserIds,
     convIds,
@@ -1292,9 +1293,10 @@ export async function getShareFriends(count = 50): Promise<ShareFriendsResponse>
     return requestJson("/api/get_share_friends", {
       method: "POST",
       body: JSON.stringify({ count: safeCount }),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("get_share_friends", { count: safeCount });
+  return invokeLocal("get_share_friends", { count: safeCount });
 }
 
 export async function sendFriendMessage(payload: {
@@ -1310,9 +1312,10 @@ export async function sendFriendMessage(payload: {
         uid: payload.toUserId,
         content: payload.content,
       }),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("send_friend_message", {
+  return invokeLocal("send_friend_message", {
     to_user_id: payload.toUserId,
     toUserId: payload.toUserId,
     uid: payload.toUserId,
@@ -1334,9 +1337,10 @@ export async function sendFriendVideoShare(payload: {
     return requestJson("/api/send_friend_video_share", {
       method: "POST",
       body: JSON.stringify(body),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("send_friend_video_share", body);
+  return invokeLocal("send_friend_video_share", body);
 }
 
 export async function sendFriendImageMessage(payload: {
@@ -1364,9 +1368,10 @@ export async function sendFriendImageMessage(payload: {
     return requestJson("/api/send_friend_image_message", {
       method: "POST",
       body: JSON.stringify(body),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("send_friend_image_message", body);
+  return invokeLocal("send_friend_image_message", body);
 }
 
 export async function getFriendMessageHistory(payload: {
@@ -1391,9 +1396,10 @@ export async function getFriendMessageHistory(payload: {
     return requestJson("/api/get_friend_message_history", {
       method: "POST",
       body: JSON.stringify(body),
+      suppressCookieInvalidEvent: true,
     });
   }
-  return invoke("get_friend_message_history", {
+  return invokeLocal("get_friend_message_history", {
     ...body,
   });
 }
