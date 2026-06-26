@@ -245,6 +245,16 @@ export const useLikedStore = create<LikedStoreState>((set, get) => ({
       const result = await getLikedAuthors(count);
       if (!result.success) {
         const message = result.message || "获取点赞作者失败";
+        if (result.need_login) {
+          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
+          set({
+            loadingAuthors: false,
+            authorsLoaded: true,
+            authorsError: message,
+          });
+          addLog(message, "warning");
+          return;
+        }
         if (result.need_verify) {
           requestVerifyRecovery({
             verifyUrl: result.verify_url,

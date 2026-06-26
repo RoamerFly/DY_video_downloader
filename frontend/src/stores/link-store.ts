@@ -42,6 +42,12 @@ export const useLinkStore = create<LinkStoreState>((set) => ({
       
       if (!result.success) {
         const message = result.message || "链接解析失败";
+        if (result.need_login) {
+          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
+          set({ parsing: false, error: message });
+          addLog(message, "warning");
+          return;
+        }
         if (result.need_verify) {
           requestVerifyRecovery({
             verifyUrl: result.verify_url,

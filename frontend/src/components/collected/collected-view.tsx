@@ -333,6 +333,14 @@ function CollectedMixesPanel() {
       const result = await getCollectedMixes(reset ? 0 : cursor, PAGE_SIZE);
       if (!result.success) {
         const message = result.message || "获取收藏合集失败";
+        if (result.need_login) {
+          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
+          setError(message);
+          setInitialized(true);
+          setHasMore(false);
+          addLog(message, "warning");
+          return;
+        }
         if (result.need_verify) {
           requestVerifyRecovery({
             verifyUrl: result.verify_url,
@@ -452,6 +460,14 @@ function MixVideosPanel({ mix, onBack }: { mix: CollectedMixItem; onBack: () => 
       const result = await getMixVideos(mix.mix_id, reset ? 0 : cursor, PAGE_SIZE);
       if (!result.success) {
         const message = result.message || "获取合集视频失败";
+        if (result.need_login) {
+          window.dispatchEvent(new CustomEvent("dy-cookie-invalid", { detail: { message } }));
+          setError(message);
+          setInitialized(true);
+          setHasMore(false);
+          addLog(message, "warning");
+          return;
+        }
         if (result.need_verify) {
           requestVerifyRecovery({
             verifyUrl: result.verify_url,
