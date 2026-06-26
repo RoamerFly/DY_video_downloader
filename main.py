@@ -196,9 +196,10 @@ if __name__ == '__main__':
 
     window_api = WindowAPI()
     window_options = {}
-    if IS_WINDOWS:
+    if IS_WINDOWS or IS_MACOS:
         window_options['frameless'] = True
-    # Mac 不用 frameless，保留原生窗口边框和系统按键，通过 AppKit 隐藏标题栏文字
+    # Mac 也走 pywebview 的 frameless 分支，才能在创建时启用 FullSizeContentView；
+    # 随后用 AppKit 把系统红黄绿按钮恢复显示，避免自定义窗口按钮。
 
     # 创建pywebview窗口
     window = webview.create_window(
