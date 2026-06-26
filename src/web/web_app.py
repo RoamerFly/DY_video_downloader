@@ -53,22 +53,6 @@ urllib3.disable_warnings(InsecureRequestWarning)
 warnings.filterwarnings('ignore', category=InsecureRequestWarning)
 socketio_debug = os.environ.get('DEBUG_MODE', '').lower() in ('true', '1', 'yes')
 
-ALLOWED_MEDIA_HOST_SUFFIXES = (
-    'douyin.com',
-    'douyinvod.com',
-    'douyinpic.com',
-    'douyinstatic.com',
-    'byteimg.com',
-    'ixigua.com',
-    'amemv.com',
-    'snssdk.com',
-    'pstatp.com',
-)
-COOKIE_MEDIA_HOST_SUFFIXES = (
-    'douyin.com',
-    'amemv.com',
-    'snssdk.com',
-)
 MEDIA_PROXY_INITIAL_VIDEO_RANGE = 'bytes=0-1048575'
 MEDIA_PROXY_MAX_RANGE_BYTES = 4 * 1024 * 1024
 MEDIA_PROXY_MAX_RETRIES = 3
@@ -201,6 +185,18 @@ updater.setup_updater(
     updater_public_key=UPDATER_PUBLIC_KEY,
     latest_release_page_url=LATEST_RELEASE_PAGE_URL,
     main_process_exit_event=_main_process_exit_event,
+)
+
+# 媒体 URL 处理工具已抽离到 src/web/media_url_utils.py
+from src.web import media_url_utils
+
+def _get_user_manager_runtime():
+    return user_manager
+
+media_url_utils.setup_media_url_utils(
+    logger=logger,
+    http_requests=http_requests,
+    get_user_manager=_get_user_manager_runtime,
 )
 
 active_tasks = {} # 用于存储活跃的 asyncio.Future 和 asyncio.Event
@@ -752,151 +748,6 @@ def _api_message(payload, fallback='请求失败'):
     return fallback
 
 
-def _media_first_url(value):
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        url_list = value.get('url_list')
-        if isinstance(url_list, list):
-            for item in url_list:
-                if isinstance(item, str) and item.strip():
-                    return item.strip()
-        for key in (
-            'main_url',
-            'backup_url',
-            'fallback_url',
-            'play_addr',
-            'play_url',
-            'download_addr',
-            'download_url',
-            'url',
-            'uri',
-        ):
-            url = _media_first_url(value.get(key))
-            if key == 'uri' and not url.lower().startswith(('http://', 'https://')):
-                continue
-            if url:
-                return url
-    if isinstance(value, list):
-        for item in value:
-            url = _media_first_url(item)
-            if url:
-                return url
-    return ''
-
-
-def _clean_no_watermark_url(url):
-    cleaned = str(url or '').strip()
-    if not cleaned:
-        return ''
-    cleaned = cleaned.replace('playwm', 'play')
-    try:
-        parsed = urlparse(cleaned)
-        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-        if 'watermark' in query:
-            query['watermark'] = '0'
-        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
-    except Exception:
-        return cleaned.replace('watermark=1', 'watermark=0')
-
-
-def _looks_watermarked_url(url):
-    text = str(url or '').lower()
-    return 'watermark=1' in text or 'playwm' in text or 'logo_name=' in text
-
-
-def _select_recommended_video_url(video_data, fallback=''):
-    video_data = video_data or {}
-    try:
-        if user_manager:
-            selected_url = user_manager._select_video_url(video_data)
-            if selected_url:
-                return selected_url
-    except Exception:
-        pass
-
-    candidates = []
-
-    def push_candidate(url, metric):
-        normalized_url = _media_first_url(url)
-        if normalized_url and not is_dash_video_only_url(normalized_url):
-            candidates.append((metric, normalized_url))
-
-    def metric(bit_rate):
-        if not isinstance(bit_rate, dict):
-            return 0
-        for key in ('data_size', 'bit_rate', 'quality_type'):
-            try:
-                value = int(bit_rate.get(key) or 0)
-            except (TypeError, ValueError):
-                value = 0
-            if value > 0:
-                return value
-        try:
-            width = int(bit_rate.get('width') or 0)
-            height = int(bit_rate.get('height') or 0)
-        except (TypeError, ValueError):
-            return 0
-        return width * height if width > 0 and height > 0 else 0
-
-    for bit_rate in video_data.get('bit_rate') or []:
-        item_metric = metric(bit_rate)
-        push_candidate((bit_rate or {}).get('play_addr'), 9_000_000 + item_metric)
-        push_candidate((bit_rate or {}).get('play_addr_h264'), 8_000_000 + item_metric)
-
-    push_candidate(fallback, 7_000_000)
-    push_candidate(video_data.get('play_addr_h264'), 6_000_000)
-    push_candidate(video_data.get('play_addr'), 5_000_000)
-    push_candidate(video_data.get('play_addr_lowbr'), 1_000_000)
-    push_candidate(video_data.get('download_addr'), 500_000)
-
-    selected = ''
-    for _, url in sorted(candidates, key=lambda item: item[0], reverse=True):
-        if not _looks_watermarked_url(url):
-            selected = url
-            break
-    if not selected and candidates:
-        selected = max(candidates, key=lambda item: item[0])[1]
-    return _clean_no_watermark_url(selected)
-
-
-def _select_dash_video_url(video_data):
-    """优先选择推荐流里的 h264 DASH 分片源，用于播放器 seek。"""
-    video_data = video_data or {}
-    for bit_rate in video_data.get('bit_rate') or []:
-        if not isinstance(bit_rate, dict):
-            continue
-        if str(bit_rate.get('format') or '').lower() != 'dash':
-            continue
-        if bool(bit_rate.get('is_h265')):
-            continue
-        urls = ((bit_rate.get('play_addr') or {}).get('url_list') or [])
-        if not isinstance(urls, list):
-            continue
-        for url in urls:
-            url = str(url or '').strip()
-            if url and 'media-video-avc1' in url:
-                return url
-        for url in urls:
-            url = str(url or '').strip()
-            if url:
-                return url
-    return ''
-
-
-def _select_dash_audio_url(video_data):
-    """选择与 DASH 视频配套的音频源。"""
-    video_data = video_data or {}
-    for audio_rate in video_data.get('bit_rate_audio') or []:
-        if not isinstance(audio_rate, dict):
-            continue
-        audio_meta = audio_rate.get('audio_meta') or {}
-        url = _media_first_url(audio_meta.get('url_list'))
-        if url:
-            return url
-    return ''
-
-
 def _verify_error_response(payload, fallback='需要完成抖音验证', verify_url=None):
     payload_dict = payload if isinstance(payload, dict) else {}
     if Config.COOKIE:
@@ -980,167 +831,6 @@ def _verify_or_request_error_response(payload, fallback='请求失败，请稍�
         return _login_error_response(login_status)
 
     return _verify_error_response(payload_dict, fallback, verify_url)
-
-
-def infer_media_type_from_url(url, fallback_type='video'):
-    """根据 URL 粗略推断媒体类型，用于兼容旧前端传入的字符串数组。"""
-    normalized_fallback = fallback_type if fallback_type in ('video', 'image', 'live_photo') else 'video'
-    if not isinstance(url, str) or not url:
-        return normalized_fallback
-
-    clean_url = url.split('?', 1)[0].lower()
-    if clean_url.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif')):
-        return 'image'
-    if clean_url.endswith(('.mp4', '.mov', '.m4v', '.webm')):
-        return 'video'
-    return normalized_fallback
-
-
-def normalize_media_urls(media_urls, raw_media_type='video'):
-    """统一媒体数据结构为 [{'url': str, 'type': str}]。"""
-    if not isinstance(media_urls, list):
-        raise ValueError(f"媒体URL格式错误: {type(media_urls)}")
-
-    fallback_type = raw_media_type if raw_media_type in ('video', 'image', 'live_photo') else 'video'
-    normalized_urls = []
-
-    for item in media_urls:
-        if isinstance(item, dict):
-            url = str(item.get('url', '')).strip()
-            if not url:
-                continue
-            normalized_urls.append({
-                'url': url,
-                'type': item.get('type') or infer_media_type_from_url(url, fallback_type)
-            })
-            continue
-
-        if isinstance(item, str):
-            url = item.strip()
-            if not url:
-                continue
-            normalized_urls.append({
-                'url': url,
-                'type': infer_media_type_from_url(url, fallback_type)
-            })
-            continue
-
-        logger.warning(f"跳过不支持的媒体URL项: {item}")
-
-    return normalized_urls
-
-
-def clean_video_download_url(url: str) -> str:
-    return (
-        str(url or '').strip()
-        .replace('watermark=1', 'watermark=0')
-        .replace('playwm', 'play')
-    )
-
-
-def is_watermark_video_url(url: str) -> bool:
-    normalized_url = str(url or '').strip().lower()
-    return bool(
-        normalized_url
-        and (
-            'playwm' in normalized_url
-            or 'watermark=1' in normalized_url
-            or '/aweme/v1/playwm' in normalized_url
-        )
-    )
-
-
-def is_dash_video_only_url(url: str) -> bool:
-    normalized_url = str(url or '').strip().lower()
-    return 'media-video' in normalized_url or 'media_video' in normalized_url
-
-
-def normalize_download_media_urls(media_urls, raw_media_type='video'):
-    normalized_urls = normalize_media_urls(media_urls, raw_media_type) if media_urls else []
-    cleaned_urls = []
-    seen = set()
-
-    for item in normalized_urls:
-        url = item.get('url', '')
-        media_type = item.get('type') or infer_media_type_from_url(url, raw_media_type)
-        if media_type == 'video':
-            url = clean_video_download_url(url)
-            if is_watermark_video_url(url) or is_dash_video_only_url(url):
-                continue
-        if not url or (media_type, url) in seen:
-            continue
-        seen.add((media_type, url))
-        cleaned_urls.append({'url': url, 'type': media_type})
-
-    return cleaned_urls
-
-
-def is_allowed_media_url(url: str) -> bool:
-    """只允许代理明确属于抖音/字节媒体域名的 http(s) URL。"""
-    try:
-        parsed = urlparse((url or '').strip())
-    except Exception:
-        return False
-
-    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
-        return False
-
-    hostname = parsed.hostname.lower().rstrip('.')
-    return any(hostname == suffix or hostname.endswith(f'.{suffix}') for suffix in ALLOWED_MEDIA_HOST_SUFFIXES)
-
-
-def should_forward_douyin_cookie(url: str) -> bool:
-    """只向登录相关域名转发账号 Cookie。"""
-    try:
-        hostname = (urlparse((url or '').strip()).hostname or '').lower().rstrip('.')
-    except Exception:
-        return False
-    return any(hostname == suffix or hostname.endswith(f'.{suffix}') for suffix in COOKIE_MEDIA_HOST_SUFFIXES)
-
-
-def _media_url_label(raw_url: str) -> str:
-    """日志里只保留媒体域名和路径，避免刷出签名参数。"""
-    try:
-        parsed = urlparse((raw_url or '').strip())
-        if parsed.netloc:
-            return f'{parsed.netloc}{parsed.path}'[:160]
-    except Exception:
-        pass
-    return str(raw_url or '')[:80]
-
-
-def _allowed_media_request_origin() -> tuple[bool, str | None]:
-    origin = (request.headers.get('Origin') or '').strip()
-    if not origin or origin == 'null':
-        return True, None
-
-    try:
-        parsed = urlparse(origin)
-    except Exception:
-        return False, None
-
-    hostname = (parsed.hostname or '').lower().rstrip('.')
-    if parsed.scheme not in ('http', 'https') or not hostname:
-        return False, None
-
-    request_host = (request.host or '').split(':', 1)[0].lower().rstrip('.')
-    allowed_hosts = {'127.0.0.1', 'localhost', 'tauri.localhost'}
-    if request_host:
-        allowed_hosts.add(request_host)
-
-    if hostname in allowed_hosts:
-        return True, origin
-
-    return False, None
-
-
-def _resolve_media_redirect_target(current_url: str, location: str) -> str | None:
-    if not location:
-        return None
-    try:
-        return http_requests.compat.urljoin(current_url, location)
-    except Exception:
-        return None
 
 
 def _remember_media_redirect(cache_key: str | None, target_url: str) -> None:
@@ -1613,7 +1303,7 @@ setup_downloads_routes(
     api_message=_api_message,
     verify_error_response=_verify_error_response,
     login_error_response=_login_error_response,
-    normalize_download_media_urls=normalize_download_media_urls,
+    normalize_download_media_urls=media_url_utils.normalize_download_media_urls,
     build_download_title=build_download_title,
     build_download_name=build_download_name,
     get_or_create_loop=get_or_create_loop,
@@ -1957,10 +1647,10 @@ def get_recommended_feed():
                     skipped_count += 1
                     logger.debug(f"跳过视频 {aweme.get('aweme_id')}: 缺少视频信息")
                     continue
-                play_addr = _media_first_url(video_data.get('play_addr'))
-                selected_video_url = _select_recommended_video_url(video_data, play_addr)
-                dash_video_url = _select_dash_video_url(video_data)
-                dash_audio_url = _select_dash_audio_url(video_data)
+                play_addr = media_url_utils._media_first_url(video_data.get('play_addr'))
+                selected_video_url = media_url_utils._select_recommended_video_url(video_data, play_addr)
+                dash_video_url = media_url_utils._select_dash_video_url(video_data)
+                dash_audio_url = media_url_utils._select_dash_audio_url(video_data)
 
                 # 跳过没有播放地址的视频
                 if not selected_video_url:
@@ -1969,7 +1659,7 @@ def get_recommended_feed():
                     continue
 
                 # 提取封面
-                cover = _media_first_url(video_data.get('cover'))
+                cover = media_url_utils._media_first_url(video_data.get('cover'))
 
                 if not cover:
                     skipped_count += 1
@@ -1977,15 +1667,15 @@ def get_recommended_feed():
                     continue
 
                 # 提取动态封面
-                dynamic_cover = _media_first_url(video_data.get('dynamic_cover'))
-                origin_cover = _media_first_url(video_data.get('origin_cover')) or cover
-                play_addr_h264 = _media_first_url(video_data.get('play_addr_h264'))
-                play_addr_lowbr = _media_first_url(video_data.get('play_addr_lowbr'))
-                download_addr = _media_first_url(video_data.get('download_addr'))
+                dynamic_cover = media_url_utils._media_first_url(video_data.get('dynamic_cover'))
+                origin_cover = media_url_utils._media_first_url(video_data.get('origin_cover')) or cover
+                play_addr_h264 = media_url_utils._media_first_url(video_data.get('play_addr_h264'))
+                play_addr_lowbr = media_url_utils._media_first_url(video_data.get('play_addr_lowbr'))
+                download_addr = media_url_utils._media_first_url(video_data.get('download_addr'))
 
                 # 提取作者头像
                 author_data = aweme.get('author', {})
-                avatar_thumb = _media_first_url(author_data.get('avatar_thumb'))
+                avatar_thumb = media_url_utils._media_first_url(author_data.get('avatar_thumb'))
                 music_info = _extract_music_info(aweme.get('music') or {})
 
                 author_key = (
@@ -2030,7 +1720,7 @@ def get_recommended_feed():
                         'play_addr': selected_video_url,
                         'dash_addr': dash_video_url,
                         'audio_addr': dash_audio_url,
-                        'preview_addr': _media_first_url(video_data.get('preview_addr')) or selected_video_url,
+                        'preview_addr': media_url_utils._media_first_url(video_data.get('preview_addr')) or selected_video_url,
                         'play_addr_h264': play_addr_h264,
                         'play_addr_lowbr': play_addr_lowbr,
                         'download_addr': download_addr,
@@ -2043,7 +1733,7 @@ def get_recommended_feed():
                     },
                     'music': {
                         **music_info,
-                        'cover': _media_first_url((aweme.get('music') or {}).get('cover_large')),
+                        'cover': media_url_utils._media_first_url((aweme.get('music') or {}).get('cover_large')),
                     }
                 }
 
@@ -2149,14 +1839,14 @@ def main():
 setup_media_proxy(
     logger=logger,
     sanitize_download_filename=_sanitize_download_filename,
-    allowed_media_request_origin=_allowed_media_request_origin,
-    is_allowed_media_url=is_allowed_media_url,
+    allowed_media_request_origin=media_url_utils.allowed_media_request_origin,
+    is_allowed_media_url=media_url_utils.is_allowed_media_url,
     cap_media_range_header=_cap_media_range_header,
     media_proxy_redirect_cache=MEDIA_PROXY_REDIRECT_CACHE,
     media_proxy_max_retries=MEDIA_PROXY_MAX_RETRIES,
-    media_url_label=_media_url_label,
-    should_forward_douyin_cookie=should_forward_douyin_cookie,
-    resolve_media_redirect_target=_resolve_media_redirect_target,
+    media_url_label=media_url_utils.media_url_label,
+    should_forward_douyin_cookie=media_url_utils.should_forward_douyin_cookie,
+    resolve_media_redirect_target=media_url_utils.resolve_media_redirect_target,
     remember_media_redirect=_remember_media_redirect,
     guess_audio_content_type=_guess_audio_content_type,
     build_content_disposition=_build_content_disposition,
