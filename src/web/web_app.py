@@ -4417,8 +4417,8 @@ def send_friend_image_message_api():
             return jsonify({'success': False, 'message': '缺少好友数字 uid，无法发送图片'}), 400
         if not image_data_url:
             return jsonify({'success': False, 'message': '图片内容不能为空'}), 400
-        if len(image_data_url) > 12 * 1024 * 1024:
-            return jsonify({'success': False, 'message': '图片太大，请选择 12MB 以内的图片'}), 400
+        if len(image_data_url) > 8 * 1024 * 1024:
+            return jsonify({'success': False, 'message': '图片太大，请选择 8MB 以内的图片'}), 400
         if not api:
             return jsonify({'success': False, 'need_login': True, 'message': '请先设置 Cookie'})
 
