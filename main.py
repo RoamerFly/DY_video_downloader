@@ -53,11 +53,7 @@ if __name__ == '__main__':
         return False
 
     def on_closing():
-        """窗口关闭回调"""
-        try:
-            flask_proc.terminate()
-        except Exception:
-            pass
+        """窗口关闭回调 — 立即退出，daemon 子进程会被系统自动清理"""
         os._exit(0)
 
     class WindowAPI:
@@ -112,10 +108,6 @@ if __name__ == '__main__':
     # 监听 Flask 子进程的退出信号（用于更新后自动关闭）
     def _watch_flask_exit():
         _flask_exit_event.wait()
-        try:
-            flask_proc.terminate()
-        except Exception:
-            pass
         os._exit(0)
     _exit_watcher = threading.Thread(target=_watch_flask_exit, daemon=True)
     _exit_watcher.start()
