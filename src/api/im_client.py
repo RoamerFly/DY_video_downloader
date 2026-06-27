@@ -702,9 +702,6 @@ class IMClient:
             extra_headers=extra_headers,
         )
 
-    # ---------- AWS VOD 签名（IM 图片上传用） ----------
-
-    @staticmethod
     # ---------- IM 图片上传（委托到 im_uploads 模块） ----------
 
     async def _get_im_image_upload_config(self) -> tuple[dict, bool]:

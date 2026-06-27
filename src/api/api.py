@@ -24,6 +24,7 @@ from src.api.im_formatters import (
 )
 from src.api import temp_cookie
 from src.api.im_client import IMClient
+from src.api import im_uploads
 from src.api.comment_client import CommentClient
 from src.api.api_errors import ApiErrors
 from src.api.ticket_guard import TicketGuard
@@ -643,15 +644,15 @@ class DouyinAPI:
 
     @staticmethod
     def _aws_quote(value) -> str:
-        return IMClient._aws_quote(value)
+        return im_uploads._aws_quote(value)
 
     @classmethod
     def _aws_canonical_query(cls, params: dict) -> str:
-        return IMClient._aws_canonical_query(params)
+        return im_uploads._aws_canonical_query(params)
 
     @staticmethod
     def _aws_signing_key(secret_access_key: str, date_stamp: str, region: str = 'cn-north-1', service: str = 'vod') -> bytes:
-        return IMClient._aws_signing_key(secret_access_key, date_stamp, region, service)
+        return im_uploads._aws_signing_key(secret_access_key, date_stamp, region, service)
 
     def _aws_vod_auth_headers(
         self,
@@ -663,7 +664,7 @@ class DouyinAPI:
         payload_hash: str,
         extra_signed_headers: dict | None = None,
     ) -> tuple[str, dict]:
-        return self.im._aws_vod_auth_headers(
+        return im_uploads._aws_vod_auth_headers(
             method, query_params, access_key_id, secret_access_key,
             session_token, payload_hash, extra_signed_headers,
         )
