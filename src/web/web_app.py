@@ -382,6 +382,10 @@ setup_downloads_routes(
     get_or_create_loop=get_or_create_loop,
     task_store=download_task_store,
 )
+
+# 下载任务控制路由（取消/暂停/恢复）注册到同一个 downloads_bp
+from src.web import download_events  # noqa: E402,F401
+
 app.register_blueprint(downloads_bp)
 
 # 视频操作路由已抽离到 src/web/video_actions.py
