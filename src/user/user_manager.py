@@ -1,22 +1,20 @@
 import asyncio
-import logging
 import os
 import urllib.parse
 from typing import List, Dict, Optional, Tuple, Union
 
 from src.api.api import DouyinAPI
-from src.config.config import Config
-from src.downloader.downloader import DouyinDownloader, build_download_name
+from src.downloader.downloader import DouyinDownloader
 from src.user import media_selectors
 from src.user import post_formatters
 from src.user import user_stats
 from src.user.favorites import FavoritesService
 from src.user.download_workflows import DownloadWorkflows
+from src.user.video_details import VideoDetailsService
 
 # 移除增强下载器支持
 ENHANCED_DOWNLOADER_AVAILABLE = False
 EnhancedDouyinDownloader = None
-logger = logging.getLogger(__name__)
 
 class DouyinUserManager:
     """抖音用户管理类"""
@@ -37,6 +35,8 @@ class DouyinUserManager:
         self._favorites: FavoritesService | None = None
         # 用户作品下载流程服务（延迟初始化）
         self._download_workflows: DownloadWorkflows | None = None
+        # 作品详情/分享链接服务（延迟初始化）
+        self._video_details: VideoDetailsService | None = None
 
     @property
     def favorites(self) -> FavoritesService:
@@ -51,6 +51,13 @@ class DouyinUserManager:
         if getattr(self, '_download_workflows', None) is None:
             self._download_workflows = DownloadWorkflows(self)
         return self._download_workflows
+
+    @property
+    def video_details(self) -> VideoDetailsService:
+        """获取作品详情服务实例（懒加载）。"""
+        if getattr(self, '_video_details', None) is None:
+            self._video_details = VideoDetailsService(self)
+        return self._video_details
 
     @staticmethod
     def _looks_like_login_error(error) -> bool:
@@ -460,253 +467,17 @@ class DouyinUserManager:
         return post_formatters.is_image_post(post)
 
     def get_media_info(self, post: dict) -> Tuple[str, List[Dict[str, str]]]:
-        """从帖子数据中提取媒体信息 (URL, 类型)
-
-        Args:
-            post: 单个作品的字典数据
-
-        Returns:
-            一个元组，包含:
-            - str: 媒体类型 ('video', 'image', 'live_photo', 'mixed', 'unknown')
-            - list: 包含媒体URL和类型的字典列表
-        """
-        urls = []
-        media_type = 'unknown'
-
-        # 检查是否为图文帖
-        if post.get("images"):
-            images = post["images"]
-            has_live = False
-            has_image = False
-
-            for img in images:
-                # Live Photo: 包含video字段且有play_addr
-                if img.get("video") and img["video"].get("play_addr"):
-                    has_live = True
-                    video_urls = img["video"]["play_addr"].get("url_list", [])
-                    if video_urls:
-                        urls.append({
-                            'type': 'live_photo',
-                            'url': video_urls[0]
-                        })
-                # 普通图片
-                elif img.get("url_list"):
-                    has_image = True
-                    urls.append({
-                        'type': 'image',
-                        'url': img["url_list"][-1]  # 通常是最高质量的
-                    })
-
-            if has_live and has_image:
-                media_type = 'mixed'
-            elif has_live:
-                media_type = 'live_photo'
-            elif has_image:
-                media_type = 'image'
-
-        # 检查是否为视频帖
-        elif post.get("video") and post["video"].get("play_addr"):
-            video_urls = self._build_video_media_urls(post.get("video") or {})
-            if video_urls:
-                media_type = 'video'
-                urls.extend(video_urls)
-
-        return media_type, urls
+        return self.video_details.get_media_info(post)
 
     def _extract_bgm_url(self, post: dict) -> Optional[str]:
         """提取作品背景音乐地址。"""
         return post_formatters.extract_bgm_url(post)
 
     async def get_video_detail(self, aweme_id: str) -> Optional[dict]:
-        """根据作品ID获取视频详情
-
-        Args:
-            aweme_id: 作品ID
-
-        Returns:
-            dict: 视频详情信息，包含媒体 URL 等
-        """
-        try:
-            # 通过作品ID获取详情的API接口
-            params = {
-                "aweme_id": aweme_id,
-                "aid": "1128",
-                "version_name": "23.5.0",
-                "device_platform": "webapp",
-                "os": "windows"
-            }
-
-            resp, succ = await self.api.common_request('/aweme/v1/web/aweme/detail/',
-                                                     params,
-                                                     {}, skip_sign=True)
-            if not succ or not (isinstance(resp, dict) and resp.get('aweme_detail')):
-                resp, succ = await self.api.common_request('/aweme/v1/web/aweme/detail/',
-                                                         params,
-                                                         {}, skip_sign=False)
-
-            if isinstance(resp, dict) and (resp.get('_need_verify') or resp.get('_need_login')):
-                return resp
-
-            if not succ or not resp.get('aweme_detail'):
-                logger.warning(f"获取视频详情失败: succ={succ}, aweme_id={aweme_id}")
-                return None
-
-            post = resp['aweme_detail']
-            
-            # 获取媒体信息
-            media_type, urls = self.get_media_info(post)
-            video_data = post.get('video') or {}
-            play_url = self._first_url(video_data.get('play_addr'))
-            selected_video_url = self._select_video_url(video_data)
-            dash_video_url = self._select_dash_video_url(video_data)
-            dash_audio_url = self._select_dash_audio_url(video_data)
-            # 构建详情信息
-            detail = {
-                'aweme_id': post.get('aweme_id', ''),
-                'desc': post.get('desc', ''),
-                'create_time': post.get('create_time', 0),
-                'duration': self._raw_duration_value(video_data.get('duration', 0)),
-                'duration_unit': 'milliseconds',
-                'digg_count': post.get('statistics', {}).get('digg_count', 0),
-                'comment_count': post.get('statistics', {}).get('comment_count', 0),
-                'share_count': post.get('statistics', {}).get('share_count', 0),
-                'is_liked': self._post_boolish(post, 'user_digged', 'is_liked', 'digg_status'),
-                'is_collected': self._post_boolish(post, 'is_collected', 'is_collect', 'collect_status', 'collect_stat'),
-                'author': {
-                    'nickname': post.get('author', {}).get('nickname', ''),
-                    'unique_id': post.get('author', {}).get('uid', ''),
-                    'sec_uid': post.get('author', {}).get('sec_uid', ''),
-                    'avatar_thumb': post.get('author', {}).get('avatar_thumb', {}).get('url_list', [''])[0] if post.get('author', {}).get('avatar_thumb') else ''
-                },
-                'statistics': {
-                    'digg_count': post.get('statistics', {}).get('digg_count', 0),
-                    'comment_count': post.get('statistics', {}).get('comment_count', 0),
-                    'share_count': post.get('statistics', {}).get('share_count', 0),
-                    'play_count': post.get('statistics', {}).get('play_count', 0),
-                    'collect_count': post.get('statistics', {}).get('collect_count', 0),
-                },
-                'media_type': media_type,
-                'media_urls': urls,
-                'raw_media_type': media_type,
-                'status': self._extract_post_status(post),
-                'cover_url': self._first_url(video_data.get('cover')),
-                # 保留原始数据字段用于调试
-                'images': post.get('images'),
-                'videos': urls,
-                'video': {
-                    'play_addr': selected_video_url,
-                    'dash_addr': dash_video_url,
-                    'audio_addr': dash_audio_url,
-                    'preview_addr': play_url or self._first_url(video_data.get('preview_addr')) or selected_video_url,
-                    'play_addr_h264': self._first_url(video_data.get('play_addr_h264')),
-                    'play_addr_lowbr': self._first_url(video_data.get('play_addr_lowbr')),
-                    'download_addr': self._first_url(video_data.get('download_addr')),
-                    'cover': self._first_url(video_data.get('cover')),
-                    'dynamic_cover': self._first_url(video_data.get('dynamic_cover')),
-                    'origin_cover': self._first_url(video_data.get('origin_cover')),
-                    'width': video_data.get('width', 0),
-                    'height': video_data.get('height', 0),
-                    'duration': self._raw_duration_value(video_data.get('duration', 0)),
-                    'duration_unit': 'milliseconds',
-                    'ratio': video_data.get('ratio', ''),
-                    'bit_rate': video_data.get('bit_rate') or [],
-                }
-            }
-            
-            # 获取封面图
-            if media_type == 'video':
-                detail['cover_url'] = self._first_url(video_data.get('cover'))
-            elif media_type in ['image', 'live_photo', 'mixed']:
-                images = post.get('images', [])
-                if images:
-                    detail['cover_url'] = self._first_url(images[0])
-
-            detail['bgm_url'] = dash_audio_url or self._extract_bgm_url(post)
-
-            return detail
-            
-        except Exception as e:
-             if self.debug_mode:
-                 print(f"\033[91m[UserManager] 获取视频详情失败: {str(e)}\033[0m")
-             return None
+        return await self.video_details.get_video_detail(aweme_id)
 
     async def parse_share_link(self, share_link: str) -> Optional[dict]:
-        """解析抖音分享链接
-        Args:
-            share_link: 抖音分享链接
-        Returns:
-            dict: 视频信息
-        """
-        try:
-            # 提取真实的视频链接
-            import re
-            import aiohttp
-            # 从分享文本中提取URL
-            url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
-            match = re.search(url_pattern, share_link)
-            if match:
-                share_link = re.split(r'[，。！？；、,!;]', match.group(), maxsplit=1)[0].strip().rstrip('，。！？；、,.!;')
-            else:
-                share_link = re.split(r'[，。！？；、,!;]', share_link.strip(), maxsplit=1)[0].strip().rstrip('，。！？；、,.!;')
-            if share_link.startswith('www.'):
-                share_link = f'https://{share_link}'
-            # 如果是短链接，需要先获取重定向后的真实链接
-            if 'v.douyin.com' in share_link:
-                try:
-                    timeout = aiohttp.ClientTimeout(total=10)  # 设置10秒超时
-                    # 创建SSL上下文，跳过证书验证
-                    ssl_context = False  # 禁用SSL验证
-                    connector = aiohttp.TCPConnector(ssl=ssl_context)
-                    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-                        async with session.get(share_link, allow_redirects=False) as response:
-                            if response.status in [301, 302]:
-                                real_url = response.headers.get('Location', '')
-                                if real_url:
-                                    share_link = real_url
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    if self.debug_mode:
-                        print(f"\033[93m[UserManager] 获取重定向链接失败: {str(e)}，使用原链接\033[0m")
-                    # 如果重定向失败，继续使用原链接
-            if self.debug_mode:
-                print(f"\033[94m[UserManager] 重定向后的URL: {share_link}\033[0m")
-            # 从链接中提取视频ID
-            aweme_id_match = re.search(r'/video/(\d+)', share_link)
-            if not aweme_id_match:
-                # 尝试其他模式
-                aweme_id_match = re.search(r'aweme_id=(\d+)', share_link)
-                if not aweme_id_match:
-                    aweme_id_match = re.search(r'modal_id=(\d+)', share_link)
-            
-            if not aweme_id_match:
-                return None
-                
-            aweme_id = aweme_id_match.group(1)
-            if self.debug_mode:
-                print(f"\033[94m[UserManager] 提取的视频ID: {aweme_id}\033[0m")
-            # 尝试获取完整详情
-            detail = await self.get_video_detail(aweme_id)
-            if detail:
-                return detail
-
-            # get_video_detail 失败时，返回基本信息
-            return {
-                'aweme_id': aweme_id,
-                'desc': f'视频 {aweme_id}',
-                'create_time': 0,
-                'digg_count': 0,
-                'comment_count': 0,
-                'share_count': 0,
-                'cover_url': '',
-                'media_type': 'unknown',
-                'media_urls': [],
-                'author': {'nickname': '', 'sec_uid': '', 'avatar_thumb': ''},
-                '_incomplete': True,  # 标记为不完整数据
-            }
-            
-        except Exception as e:
-            if self.debug_mode:
-                print(f"\033[91m[UserManager] 解析分享链接失败: {str(e)}\033[0m")
-            return None
+        return await self.video_details.parse_share_link(share_link)
 
     def _get_media_info(self, post: dict) -> tuple[str, list]:
         """兼容旧调用，返回与 get_media_info 相同的统一结构。"""
