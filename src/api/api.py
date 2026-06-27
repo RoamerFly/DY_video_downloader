@@ -36,6 +36,7 @@ from src.api.im_formatters import (
 from src.api import temp_cookie
 from src.api.im_client import IMClient
 from src.api.comment_client import CommentClient
+from src.api.api_errors import ApiErrors
 
 logger = logging.getLogger('api')
 
@@ -108,6 +109,8 @@ class DouyinAPI:
         self._im_client: IMClient | None = None
         # 评论客户端（延迟初始化）
         self._comment_client: CommentClient | None = None
+        # 请求错误/登录态/验证态判断服务（延迟初始化）
+        self._api_errors: ApiErrors | None = None
 
     @property
     def im(self) -> IMClient:
@@ -122,6 +125,13 @@ class DouyinAPI:
         if self._comment_client is None:
             self._comment_client = CommentClient(self)
         return self._comment_client
+
+    @property
+    def api_errors(self) -> ApiErrors:
+        """获取请求错误/登录态/验证态判断服务实例（懒加载）。"""
+        if self._api_errors is None:
+            self._api_errors = ApiErrors(self)
+        return self._api_errors
 
     async def _get_webid(self, headers: dict, url: str = '') -> str:
         """获取webid（缓存10分钟）"""
@@ -450,133 +460,19 @@ class DouyinAPI:
         return f"verify_0{random_str}"
 
     def _build_verify_hint(self, uri: str, params: dict, response=None) -> tuple[dict, bool]:
-        """构造统一的验证提示结果。"""
-        verify_url = 'https://www.douyin.com/'
-
-        try:
-            if uri and ('discover/search' in uri or 'general/search' in uri):
-                keyword = params.get('keyword', '')
-                if keyword:
-                    verify_url = f"https://www.douyin.com/jingxuan/search/{urllib.parse.quote(str(keyword))}?type=user"
-            elif uri and 'user/profile' in uri:
-                sec_uid = params.get('sec_user_id', '')
-                if sec_uid:
-                    verify_url = f'https://www.douyin.com/user/{sec_uid}'
-            elif uri and 'aweme/post' in uri:
-                sec_uid = params.get('sec_user_id', '')
-                if sec_uid:
-                    verify_url = f'https://www.douyin.com/user/{sec_uid}'
-            elif uri and 'aweme/favorite' in uri:
-                verify_url = 'https://www.douyin.com/'
-            elif uri and 'module/feed' in uri:
-                verify_url = 'https://www.douyin.com/?recommend=1'
-            elif uri and 'aweme/detail' in uri:
-                aweme_id = params.get('aweme_id', '')
-                if aweme_id:
-                    verify_url = f'https://www.douyin.com/video/{aweme_id}'
-            elif uri and 'comment/list' in uri:
-                aweme_id = params.get('aweme_id', '')
-                if aweme_id:
-                    verify_url = f'https://www.douyin.com/video/{aweme_id}'
-        except Exception:
-            pass
-
-        message = '需要完成验证后重试'
-        if response is not None:
-            try:
-                if getattr(response, 'status_code', 0):
-                    message = f'请求被拒绝（HTTP {response.status_code}），请完成验证后重试'
-            except Exception:
-                pass
-
-        return {
-            '_need_verify': True,
-            '_verify_url': verify_url,
-            'message': message,
-        }, False
+        return self.api_errors._build_verify_hint(uri, params, response)
 
     def _extract_api_message(self, data: dict, fallback: str = '请求失败') -> str:
-        if not isinstance(data, dict):
-            return fallback
-
-        for key in ('message', 'status_msg', 'log_pb'):
-            value = data.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-
-        return fallback
+        return self.api_errors._extract_api_message(data, fallback)
 
     def _looks_like_logged_out_error(self, data: dict) -> bool:
-        if not isinstance(data, dict):
-            return False
-
-        status_code = data.get('status_code')
-        if status_code in (8, '8'):
-            return True
-
-        text_parts = []
-        for key in ('message', 'status_msg', 'prompts', 'status_msg_extra'):
-            value = data.get(key)
-            if isinstance(value, str):
-                text_parts.append(value)
-            elif value is not None:
-                text_parts.append(str(value))
-
-        text = ' '.join(text_parts).lower()
-        return any(
-            token in text
-            for token in (
-                '用户未登录',
-                '未登录',
-                '登录态',
-                '重新登录',
-                'session expired',
-                'not login',
-                'not logged in',
-                'login required',
-            )
-        )
+        return self.api_errors._looks_like_logged_out_error(data)
 
     def _build_login_required_error(self, data: dict | None = None) -> dict:
-        data = data if isinstance(data, dict) else {}
-        api_message = self._extract_api_message(data, '用户未登录')
-        return {
-            '_need_login': True,
-            'status_code': data.get('status_code'),
-            'status_msg': data.get('status_msg', ''),
-            'message': f'{api_message}，请在设置中重新登录并刷新 Cookie',
-        }
+        return self.api_errors._build_login_required_error(data)
 
     def _looks_like_login_or_verify_error(self, uri: str, data: dict) -> bool:
-        if not isinstance(data, dict):
-            return False
-
-        text_parts = []
-        for key in ('message', 'status_msg', 'prompts', 'status_msg_extra'):
-            value = data.get(key)
-            if isinstance(value, str):
-                text_parts.append(value)
-            elif value is not None:
-                text_parts.append(str(value))
-
-        filter_detail = data.get('filter_detail')
-        if isinstance(filter_detail, dict):
-            text_parts.extend(str(value) for value in filter_detail.values() if value is not None)
-
-        text = ' '.join(text_parts).lower()
-        if not text:
-            return False
-
-        if any(token in text for token in ('verify', 'captcha', 'passport', 'login')):
-            return True
-        if any(token in text for token in ('验证', '登录', 'cookie', '风控', '访问频繁', '请稍后重试')):
-            return True
-
-        sensitive_uri = any(
-            fragment in (uri or '')
-            for fragment in ('aweme/post', 'aweme/favorite', 'module/feed', 'tab/feed', 'user/profile', 'comment/list')
-        )
-        return sensitive_uri and '请求失败' in text
+        return self.api_errors._looks_like_login_or_verify_error(uri, data)
 
     async def common_request(self, uri: str, params: dict, headers: dict, host: str = None, skip_sign: bool = False, method: str = 'GET') -> tuple[dict, bool]:
         """
