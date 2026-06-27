@@ -7,7 +7,6 @@ import asyncio
 import logging
 
 from src.config.config import Config
-from src.downloader.filename_builder import build_download_name
 from src.user.mix_service import MixService
 
 logger = logging.getLogger('user.favorites')
@@ -455,58 +454,7 @@ class FavoritesService:
     # ---------- 下载点赞视频/作者 ----------
 
     async def download_liked_videos(self, count=20):
-        """下载点赞视频"""
-        try:
-            videos = await self.get_liked_videos(count)
-            if isinstance(videos, dict):
-                return 0
-            if not videos:
-                return 0
-
-            max_workers = max(1, int(getattr(Config, 'MAX_CONCURRENT', 3) or 1))
-            semaphore = asyncio.Semaphore(max_workers)
-
-            async def download_one(video: dict) -> int:
-                aweme_id = video.get('aweme_id')
-                media_type = video.get('media_type', 'unknown')
-                media_urls = video.get('media_urls') or []
-                if not aweme_id or not media_urls:
-                    return 0
-
-                author_name = (video.get('author') or {}).get('nickname') or 'liked'
-                name = build_download_name(
-                    author_name,
-                    video.get('desc', ''),
-                    aweme_id,
-                    media_type=media_type,
-                    create_time=video.get('create_time'),
-                )
-
-                async with semaphore:
-                    if media_type == 'video' and len(media_urls) == 1:
-                        fallback_urls = self.get_video_download_urls((video.get('video') or {}))
-                        success = await asyncio.to_thread(
-                            self.downloader.download_video,
-                            media_urls[0]['url'],
-                            name,
-                            aweme_id,
-                            fallback_urls=fallback_urls,
-                        )
-                    else:
-                        success = await asyncio.to_thread(
-                            self.downloader.download_media_group,
-                            media_urls,
-                            name,
-                            aweme_id,
-                        )
-
-                return 1 if success else 0
-
-            results = await asyncio.gather(*(download_one(video) for video in videos), return_exceptions=True)
-            return sum(result for result in results if isinstance(result, int))
-        except Exception as e:
-            print(f"\033[91m下载点赞视频时出错: {e}\033[0m")
-            return 0
+        return await self._mgr.download_workflows.download_liked_videos(count)
 
     async def get_liked_authors(self, count=20):
         """获取点赞作品的作者列表，返回与parse_share_link中user数据结构相同的格式"""
@@ -592,35 +540,4 @@ class FavoritesService:
             return []
 
     async def download_liked_authors(self, count=20, selected_sec_uids=None):
-        """下载点赞作品的作者的所有作品"""
-        try:
-            authors = await self.get_liked_authors(count)
-            if isinstance(authors, dict):
-                return 0
-            if not authors:
-                return 0
-
-            selected = set(selected_sec_uids or [])
-            selected_authors = [
-                author for author in authors
-                if not selected or author.get('sec_uid') in selected
-            ]
-
-            max_workers = max(1, int(getattr(Config, 'MAX_CONCURRENT', 3) or 1))
-            semaphore = asyncio.Semaphore(max_workers)
-
-            async def download_one_author(author: dict) -> int:
-                async with semaphore:
-                    print(f"\n\033[36m正在处理作者: {author['nickname']}\033[0m")
-                    await self.download_user_videos(author, auto_confirm=True)
-                return 1
-
-            results = await asyncio.gather(
-                *(download_one_author(author) for author in selected_authors),
-                return_exceptions=True,
-            )
-            return sum(result for result in results if isinstance(result, int))
-
-        except Exception as e:
-            print(f"\033[91m处理失败：{str(e)}\033[0m")
-            return 0
+        return await self._mgr.download_workflows.download_liked_authors(count, selected_sec_uids)

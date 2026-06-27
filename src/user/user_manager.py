@@ -11,6 +11,7 @@ from src.user import media_selectors
 from src.user import post_formatters
 from src.user import user_stats
 from src.user.favorites import FavoritesService
+from src.user.download_workflows import DownloadWorkflows
 
 # 移除增强下载器支持
 ENHANCED_DOWNLOADER_AVAILABLE = False
@@ -34,6 +35,8 @@ class DouyinUserManager:
             print(f"\033[94m[UserManager] 调试模式已启用，使用 {downloader_type} 下载器\033[0m")
         # 点赞/收藏/合集服务（延迟初始化）
         self._favorites: FavoritesService | None = None
+        # 用户作品下载流程服务（延迟初始化）
+        self._download_workflows: DownloadWorkflows | None = None
 
     @property
     def favorites(self) -> FavoritesService:
@@ -41,6 +44,13 @@ class DouyinUserManager:
         if getattr(self, '_favorites', None) is None:
             self._favorites = FavoritesService(self)
         return self._favorites
+
+    @property
+    def download_workflows(self) -> DownloadWorkflows:
+        """获取用户作品下载流程服务实例（懒加载）。"""
+        if getattr(self, '_download_workflows', None) is None:
+            self._download_workflows = DownloadWorkflows(self)
+        return self._download_workflows
 
     @staticmethod
     def _looks_like_login_error(error) -> bool:
@@ -706,157 +716,7 @@ class DouyinUserManager:
         return post_formatters.media_type_label(media_type, media_urls)
 
     async def download_user_videos(self, user_info: dict, auto_confirm: bool = False,web_socket: bool = False):
-        """下载用户视频
-        Args:
-            user_info: 用户信息
-            auto_confirm: 是否自动确认下载（不需要用户输入）
-            web_socket: 是否使用WebSocket返回下载进度
-        """
-        user_id = user_info['sec_uid']
-        nickname = user_info.get('nickname', 'unknown')
-        
-        # 获取视频列表
-        posts = await self.get_user_videos(user_id, limit=200)
-        if isinstance(posts, dict):
-            error_msg = posts.get('message') or f"未找到用户 {nickname} 的作品"
-            if web_socket and self.socketio:
-                self.socketio.emit('download_error', {'message': error_msg})
-            else:
-                print(f"\033[91m{error_msg}\033[0m")
-            raise Exception(error_msg)
-        if not posts:
-            error_msg = f"未找到用户 {nickname} 的作品"
-            if web_socket and self.socketio:
-                self.socketio.emit('download_error', {'message': error_msg})
-            else:
-                print(f"\033[91m{error_msg}\033[0m")
-            raise Exception(error_msg)
-
-        # 过滤出磁盘上仍然存在的已下载作品；如果用户删除了文件，允许重新下载。
-        new_posts = [
-            post for post in posts
-            if not self.downloader._is_aweme_downloaded(post['aweme_id'], nickname)
-        ]
-        
-        if not new_posts:
-            info_msg = f"用户 {nickname} 没有新作品需要下载"
-            if web_socket and self.socketio:
-                self.socketio.emit('download_info', {'message': info_msg})
-            else:
-                print(f"\033[93m{info_msg}\033[0m")
-            return
-            
-        found_msg = f"找到 {len(new_posts)} 个新作品"
-        if web_socket and self.socketio:
-            self.socketio.emit('download_info', {'message': found_msg})
-        else:
-            print(f"\n\033[36m{found_msg}\033[0m")
-        
-        # 如果是自动确认模式或WebSocket模式，直接下载所有作品
-        if auto_confirm or web_socket:
-            selected_posts = new_posts
-        else:
-            # 显示作品列表
-            for i, post in enumerate(new_posts):
-                media_type, urls = self._get_media_info(post)
-                type_str = self._media_type_label(media_type, urls)
-                
-                print(f"\033[36m{i}. [{type_str}] {post['desc']}\033[0m")
-
-            # 处理用户输入
-            str_sub = input("\033[31m请输入要下载的序号\n1. 单个数字下载单个作品，多个数字用空格隔开下载多个作品\n2. 片段用-隔开\n3. 直接回车下载全部\033[0m\n")
-            
-            selected_posts = []
-            if str_sub:
-                for part in str_sub.split():
-                    if '-' in part:
-                        start, end = map(int, part.split('-'))
-                        selected_posts.extend(new_posts[start:end+1])
-                    else:
-                        selected_posts.append(new_posts[int(part)])
-            else:
-                selected_posts = new_posts
-
-        # 下载选中的作品
-        for i, post in enumerate(selected_posts, 1):
-            media_type, urls = self._get_media_info(post)
-            type_str = self._media_type_label(media_type, urls)
-            
-            progress_msg = f"正在下载第 {i}/{len(selected_posts)} 个 [{type_str}]"
-            if web_socket and self.socketio:
-                self.socketio.emit('download_progress', {
-                    'current': i,
-                    'total': len(selected_posts),
-                    'message': progress_msg,
-                    'type': type_str
-                })
-            else:
-                print(f"\033[36m{progress_msg}\033[0m")
-            
-            aweme_id = post['aweme_id']
-            name = build_download_name(
-                nickname,
-                post.get('desc', ''),
-                aweme_id,
-                media_type=media_type,
-                create_time=post.get('create_time'),
-            )
-            
-            if not urls:
-                error_msg = f"无法获取媒体URL: {post['desc']}"
-                if web_socket and self.socketio:
-                    self.socketio.emit('download_error', {'message': error_msg})
-                else:
-                    print(f"\033[91m{error_msg}\033[0m")
-                continue
-            
-            if media_type in ['mixed', 'live_photo', 'image']:
-                success = await asyncio.to_thread(
-                    self.downloader.download_media_group,
-                    urls,
-                    name,
-                    aweme_id,
-                )
-                if success:
-                    success_msg = f"作品 {name} 下载完成"
-                    if web_socket and self.socketio:
-                        self.socketio.emit('download_success', {'message': success_msg})
-                    else:
-                        print(f"\033[92m{success_msg}\033[0m")
-                else:
-                    error_msg = f"作品 {name} 下载失败"
-                    if web_socket and self.socketio:
-                        self.socketio.emit('download_error', {'message': error_msg})
-                    else:
-                        print(f"\033[91m{error_msg}\033[0m")
-                
-            elif media_type == 'video':
-                fallback_urls = self.get_video_download_urls(post.get('video') or {})
-                success = await asyncio.to_thread(
-                    self.downloader.download_video,
-                    urls[0]['url'],
-                    name,
-                    aweme_id,
-                    fallback_urls=fallback_urls,
-                )
-                if success:
-                    success_msg = f"作品 {name} 下载完成"
-                    if web_socket and self.socketio:
-                        self.socketio.emit('download_success', {'message': success_msg})
-                    else:
-                        print(f"\033[92m{success_msg}\033[0m")
-                else:
-                    error_msg = f"作品 {name} 下载失败"
-                    if web_socket and self.socketio:
-                        self.socketio.emit('download_error', {'message': error_msg})
-                    else:
-                        print(f"\033[91m{error_msg}\033[0m")
-            else:
-                error_msg = f"未知的媒体类型: {post['desc']}"
-                if web_socket and self.socketio:
-                    self.socketio.emit('download_error', {'message': error_msg})
-                else:
-                    print(f"\033[91m{error_msg}\033[0m")
+        return await self.download_workflows.download_user_videos(user_info, auto_confirm=auto_confirm, web_socket=web_socket)
 
     # 点赞接口不需要签名
     _FAVORITE_HEADERS = {'Referer': 'https://www.douyin.com/'}
