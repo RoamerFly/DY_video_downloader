@@ -10,6 +10,7 @@ from src.downloader.downloader import DouyinDownloader, build_download_name
 from src.user import media_selectors
 from src.user import post_formatters
 from src.user import user_stats
+from src.user.favorites import FavoritesService
 
 # 移除增强下载器支持
 ENHANCED_DOWNLOADER_AVAILABLE = False
@@ -31,6 +32,15 @@ class DouyinUserManager:
         if self.debug_mode:
             downloader_type = "Standard"
             print(f"\033[94m[UserManager] 调试模式已启用，使用 {downloader_type} 下载器\033[0m")
+        # 点赞/收藏/合集服务（延迟初始化）
+        self._favorites: FavoritesService | None = None
+
+    @property
+    def favorites(self) -> FavoritesService:
+        """获取点赞/收藏/合集服务实例（懒加载）。"""
+        if self._favorites is None:
+            self._favorites = FavoritesService(self)
+        return self._favorites
 
     @staticmethod
     def _looks_like_login_error(error) -> bool:
@@ -965,512 +975,47 @@ class DouyinUserManager:
             return []
 
     def _build_collection_video_item(self, post):
-        aweme_id = post.get('aweme_id')
-        if not aweme_id:
-            return None
-        media_type, media_urls = self.get_media_info(post)
-        video_data = post.get('video') or {}
-        play_url = self._first_url(video_data.get('play_addr'))
-        selected_video_url = self._video_display_url(video_data, media_urls)
-        dash_video_url = self._select_dash_video_url(video_data)
-        dash_audio_url = self._select_dash_audio_url(video_data)
-        duration = self._raw_duration_value(video_data.get('duration', 0))
-        cover_url = ""
-        if video_data.get('cover'):
-            cover_url = video_data['cover'].get('url_list', [''])[0]
-        elif post.get('images'):
-            cover_url = post['images'][0].get('url_list', [''])[-1]
-        author = post.get('author', {}) or {}
-        return {
-            'aweme_id': aweme_id,
-            'desc': post.get('desc', ''),
-            'create_time': post.get('create_time', 0),
-            'digg_count': post.get('statistics', {}).get('digg_count', 0),
-            'comment_count': post.get('statistics', {}).get('comment_count', 0),
-            'share_count': post.get('statistics', {}).get('share_count', 0),
-            'is_liked': self._post_boolish(post, 'user_digged', 'is_liked', 'digg_status'),
-            'is_collected': self._post_boolish(post, 'is_collected', 'is_collect', 'collect_status', 'collect_stat', default=True),
-            'cover_url': cover_url,
-            'duration': duration,
-            'duration_unit': 'milliseconds',
-            'media_type': media_type,
-            'raw_media_type': media_type,
-            'status': self._extract_post_status(post),
-            'media_urls': media_urls,
-            'bgm_url': dash_audio_url or self._extract_bgm_url(post),
-            'statistics': {
-                'digg_count': post.get('statistics', {}).get('digg_count', 0),
-                'comment_count': post.get('statistics', {}).get('comment_count', 0),
-                'share_count': post.get('statistics', {}).get('share_count', 0),
-                'play_count': post.get('statistics', {}).get('play_count', 0),
-                'collect_count': post.get('statistics', {}).get('collect_count', 0),
-            },
-            'video': {
-                'play_addr': selected_video_url,
-                'dash_addr': dash_video_url,
-                'audio_addr': dash_audio_url,
-                'preview_addr': selected_video_url or play_url,
-                'play_addr_h264': self._first_url(video_data.get('play_addr_h264')),
-                'play_addr_lowbr': self._first_url(video_data.get('play_addr_lowbr')),
-                'download_addr': self._first_url(video_data.get('download_addr')),
-                'cover': cover_url,
-                'dynamic_cover': self._first_url(video_data.get('dynamic_cover')) or cover_url,
-                'origin_cover': self._first_url(video_data.get('origin_cover')) or cover_url,
-                'width': video_data.get('width', 0),
-                'height': video_data.get('height', 0),
-                'duration': duration,
-                'duration_unit': 'milliseconds',
-                'ratio': video_data.get('ratio', ''),
-                'bit_rate': video_data.get('bit_rate') or [],
-            },
-            'author': {
-                'nickname': author.get('nickname', ''),
-                'sec_uid': author.get('sec_uid', ''),
-                'avatar_thumb': author.get('avatar_thumb', {}).get('url_list', [''])[0] if author.get('avatar_thumb') else ''
-            }
-        }
+        return self.favorites._build_collection_video_item(post)
 
     @staticmethod
     def _boolish(value) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value > 0
-        if isinstance(value, str):
-            return value.strip().lower() in ('1', 'true', 'yes')
-        return False
+        return FavoritesService._boolish(value)
 
     @classmethod
     def _post_boolish(cls, post: dict, *keys: str, default: bool = False) -> bool:
-        if not isinstance(post, dict):
-            return default
-        saw_value = False
-        for key in keys:
-            if key not in post or post.get(key) is None:
-                continue
-            saw_value = True
-            if cls._boolish(post.get(key)):
-                return True
-        return False if saw_value else default
+        return FavoritesService._post_boolish(post, *keys, default=default)
 
     async def set_video_liked(self, aweme_id: str, liked: bool) -> dict:
-        """点赞或取消点赞作品。"""
-        aweme_id = str(aweme_id or '').strip()
-        if not aweme_id:
-            return {'_error': True, 'message': '作品ID不能为空'}
-
-        resp, success = await self.api.signed_form_action_request(
-            '/aweme/v1/web/commit/item/digg/',
-            {
-                'aweme_id': aweme_id,
-                'item_type': '0',
-                # Douyin web uses type=1 for digg and type=0 for cancel.
-                # The response field is_digg is not reliable for persistence.
-                'type': '1' if liked else '0',
-            },
-            {
-                'Referer': 'https://www.douyin.com/',
-                'Origin': 'https://www.douyin.com',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            },
-            host='https://www-hj.douyin.com',
-        )
-
-        if not success:
-            return resp if isinstance(resp, dict) else {'_error': True, 'message': '点赞失败'}
-
-        return {
-            'success': True,
-            'aweme_id': aweme_id,
-            'is_liked': liked,
-            'raw': resp,
-            'message': '点赞成功' if liked else '已取消点赞',
-        }
+        return await self.favorites.set_video_liked(aweme_id, liked)
 
     async def set_user_followed(self, user_id: str, follow: bool) -> dict:
-        """关注或取消关注用户。"""
-        user_id = str(user_id or '').strip()
-        if not user_id:
-            return {'_error': True, 'message': '用户ID不能为空'}
-
-        resp, success = await self.api.signed_form_action_request(
-            '/aweme/v1/web/commit/follow/user/',
-            {
-                'type': '1' if follow else '0',
-                'user_id': user_id,
-            },
-            {
-                'Referer': 'https://www.douyin.com/',
-                'Origin': 'https://www.douyin.com',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            },
-            host='https://www-hj.douyin.com',
-        )
-
-        if not success:
-            return resp if isinstance(resp, dict) else {'_error': True, 'message': '关注失败'}
-
-        return {
-            'success': True,
-            'user_id': user_id,
-            'is_follow': follow,
-            'follow_status': int(resp.get('follow_status', 0)) if isinstance(resp, dict) else (1 if follow else 0),
-            'raw': resp,
-            'message': '关注成功' if follow else '已取消关注',
-        }
+        return await self.favorites.set_user_followed(user_id, follow)
 
     async def set_video_collected(self, aweme_id: str, collected: bool) -> dict:
-        """收藏或取消收藏作品。"""
-        aweme_id = str(aweme_id or '').strip()
-        if not aweme_id:
-            return {'_error': True, 'message': '作品ID不能为空'}
-
-        resp, success = await self.api.signed_form_action_request(
-            '/aweme/v1/web/aweme/collect/',
-            {
-                'action': '1' if collected else '0',
-                'aweme_id': aweme_id,
-                'aweme_type': '0',
-            },
-            {
-                'Referer': 'https://www.douyin.com/',
-                'Origin': 'https://www.douyin.com',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            },
-            host='https://www-hj.douyin.com',
-        )
-
-        if not success:
-            return resp if isinstance(resp, dict) else {'_error': True, 'message': '收藏失败'}
-
-        return {
-            'success': True,
-            'aweme_id': aweme_id,
-            'is_collected': collected,
-            'message': '收藏成功' if collected else '已取消收藏',
-        }
+        return await self.favorites.set_video_collected(aweme_id, collected)
 
     @staticmethod
     def _response_has_more(resp):
-        return resp.get('has_more') in (1, True, '1', 'true', 'True')
+        return FavoritesService._response_has_more(resp)
 
     @staticmethod
     def _response_cursor(resp):
-        return resp.get('cursor') or resp.get('max_cursor') or resp.get('min_cursor') or 0
+        return FavoritesService._response_cursor(resp)
 
     async def get_collected_videos(self, count=20, cursor=0):
-        """获取收藏视频列表"""
-        try:
-            params = {
-                'count': count,
-                'cursor': cursor,
-            }
-            headers = {
-                'Referer': 'https://www.douyin.com/user/self?from_tab_name=main&showTab=favorite_collection',
-                'Origin': 'https://www.douyin.com',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            }
-            resp, succ = await self.api.common_request(
-                '/aweme/v1/web/aweme/listcollection/',
-                params,
-                headers,
-                method='POST',
-            )
-            if isinstance(resp, dict) and (resp.get('_need_verify') or resp.get('_need_login')):
-                return resp
-            if not succ:
-                return {
-                    '_error': True,
-                    'message': (resp or {}).get('message') or (resp or {}).get('status_msg') or '获取收藏视频失败，请检查 Cookie 或稍后重试',
-                }
-
-            videos = [
-                item for item in (self._build_collection_video_item(post) for post in (resp.get('aweme_list') or []))
-                if item
-            ]
-            return {
-                'data': videos,
-                'cursor': self._response_cursor(resp),
-                'has_more': self._response_has_more(resp),
-            }
-        except Exception as e:
-            if self.debug_mode:
-                print(f"\033[91m[UserManager] 获取收藏视频时出错: {e}\033[0m")
-            if self._looks_like_login_error(e):
-                return self._login_required_message('收藏视频')
-            return {'_error': True, 'message': f'获取收藏视频失败: {e}'}
+        return await self.favorites.get_collected_videos(count, cursor)
 
     async def get_collected_mixes(self, count=20, cursor=0):
-        """获取收藏合集列表"""
-        try:
-            params = {
-                'count': count,
-                'cursor': cursor,
-            }
-            headers = {
-                'Referer': 'https://www.douyin.com/user/self?from_tab_name=main&showTab=favorite_collection',
-            }
-            resp, succ = await self.api.common_request(
-                '/aweme/v1/web/mix/listcollection/',
-                params,
-                headers,
-            )
-            if isinstance(resp, dict) and (resp.get('_need_verify') or resp.get('_need_login')):
-                return resp
-            if not succ:
-                return {
-                    '_error': True,
-                    'message': (resp or {}).get('message') or (resp or {}).get('status_msg') or '获取收藏合集失败，请检查 Cookie 或稍后重试',
-                }
-
-            mixes = []
-            for item in resp.get('mix_infos', []) or []:
-                mix_id = item.get('mix_id')
-                if not mix_id:
-                    continue
-                author = item.get('author', {}) or {}
-                statis = item.get('statis', {}) or {}
-                cover_url = ''
-                if item.get('cover_url'):
-                    cover_url = item['cover_url'].get('url_list', [''])[0]
-                mixes.append({
-                    'mix_id': mix_id,
-                    'mix_name': item.get('mix_name', ''),
-                    'desc': item.get('desc', ''),
-                    'cover_url': cover_url,
-                    'author': {
-                        'nickname': author.get('nickname', ''),
-                        'sec_uid': author.get('sec_uid', ''),
-                        'avatar_thumb': author.get('avatar_thumb', {}).get('url_list', [''])[0] if author.get('avatar_thumb') else '',
-                    },
-                    'statis': {
-                        'collect_vv': statis.get('collect_vv', 0),
-                        'play_vv': statis.get('play_vv', 0),
-                        'updated_to_episode': statis.get('updated_to_episode', 0),
-                    },
-                    'create_time': item.get('create_time', 0),
-                    'update_time': item.get('update_time', 0),
-                    'mix_type': item.get('mix_type', 0),
-                })
-
-            return {
-                'data': mixes,
-                'cursor': self._response_cursor(resp),
-                'has_more': self._response_has_more(resp),
-            }
-        except Exception as e:
-            if self.debug_mode:
-                print(f"\033[91m[UserManager] 获取收藏合集时出错: {e}\033[0m")
-            if self._looks_like_login_error(e):
-                return self._login_required_message('收藏合集')
-            return {'_error': True, 'message': f'获取收藏合集失败: {e}'}
+        return await self.favorites.get_collected_mixes(count, cursor)
 
     async def get_mix_videos(self, series_id, count=20, cursor=0):
-        """获取收藏合集内的视频列表"""
-        try:
-            params = {
-                'series_id': series_id,
-                'pull_type': 2,
-                'cursor': cursor,
-                'count': count,
-            }
-            headers = {
-                'Referer': 'https://www.douyin.com/user/self?from_tab_name=main&showTab=favorite_collection',
-            }
-            resp, succ = await self.api.common_request(
-                '/aweme/v1/web/series/aweme/',
-                params,
-                headers,
-            )
-            if isinstance(resp, dict) and (resp.get('_need_verify') or resp.get('_need_login')):
-                return resp
-            if not succ:
-                return {
-                    '_error': True,
-                    'message': (resp or {}).get('message') or (resp or {}).get('status_msg') or '获取合集视频失败，请检查 Cookie 或稍后重试',
-                }
-
-            videos = [
-                item for item in (self._build_collection_video_item(post) for post in (resp.get('aweme_list') or []))
-                if item
-            ]
-            return {
-                'data': videos,
-                'cursor': self._response_cursor(resp),
-                'has_more': self._response_has_more(resp),
-            }
-        except Exception as e:
-            if self.debug_mode:
-                print(f"\033[91m[UserManager] 获取合集视频时出错: {e}\033[0m")
-            return {'_error': True, 'message': f'获取合集视频失败: {e}'}
+        return await self.favorites.get_mix_videos(series_id, count, cursor)
 
     async def download_liked_videos(self, count=20):
-        """下载点赞视频"""
-        try:
-            videos = await self.get_liked_videos(count)
-            if isinstance(videos, dict):
-                return 0
-            if not videos:
-                return 0
-
-            max_workers = max(1, int(getattr(Config, 'MAX_CONCURRENT', 3) or 1))
-            semaphore = asyncio.Semaphore(max_workers)
-
-            async def download_one(video: dict) -> int:
-                aweme_id = video.get('aweme_id')
-                media_type = video.get('media_type', 'unknown')
-                media_urls = video.get('media_urls') or []
-                if not aweme_id or not media_urls:
-                    return 0
-
-                author_name = (video.get('author') or {}).get('nickname') or 'liked'
-                name = build_download_name(
-                    author_name,
-                    video.get('desc', ''),
-                    aweme_id,
-                    media_type=media_type,
-                    create_time=video.get('create_time'),
-                )
-
-                async with semaphore:
-                    if media_type == 'video' and len(media_urls) == 1:
-                        fallback_urls = self.get_video_download_urls((video.get('video') or {}))
-                        success = await asyncio.to_thread(
-                            self.downloader.download_video,
-                            media_urls[0]['url'],
-                            name,
-                            aweme_id,
-                            fallback_urls=fallback_urls,
-                        )
-                    else:
-                        success = await asyncio.to_thread(
-                            self.downloader.download_media_group,
-                            media_urls,
-                            name,
-                            aweme_id,
-                        )
-
-                return 1 if success else 0
-
-            results = await asyncio.gather(*(download_one(video) for video in videos), return_exceptions=True)
-            return sum(result for result in results if isinstance(result, int))
-        except Exception as e:
-            print(f"\033[91m下载点赞视频时出错: {e}\033[0m")
-            return 0
+        return await self.favorites.download_liked_videos(count)
 
     async def get_liked_authors(self, count=20):
-        """获取点赞作品的作者列表，返回与parse_share_link中user数据结构相同的格式"""
-        try:
-            params = {
-                "count": count,
-                "max_cursor": 0
-            }
-            
-            resp, succ = await self.api.common_request('/aweme/v1/web/aweme/favorite/', params,
-                                                     dict(self._FAVORITE_HEADERS),
-                                                     skip_sign=True)
-            if isinstance(resp, dict) and (resp.get('_need_verify') or resp.get('_need_login')):
-                return resp
-            if not succ:
-                return {
-                    '_error': True,
-                    'message': (resp or {}).get('message') or (resp or {}).get('status_msg') or '获取点赞作者失败，请检查 Cookie 或稍后重试',
-                }
-
-            posts = resp.get('aweme_list', [])
-            if not posts:
-                return []
-                
-            unique_authors = []
-            seen = set()
-            for post in posts:
-                author = post.get('author', {})
-                sec_uid = author.get('sec_uid')
-                if sec_uid and sec_uid not in seen:
-                    seen.add(sec_uid)
-                    unique_authors.append((sec_uid, author))
-
-            detail_concurrency = max(1, min(int(getattr(Config, 'MAX_CONCURRENT', 3) or 1), 5))
-            semaphore = asyncio.Semaphore(detail_concurrency)
-
-            async def load_author_detail(sec_uid: str, author: dict) -> dict:
-                async with semaphore:
-                    user_detail = await self.get_user_detail(sec_uid)
-
-                if user_detail:
-                    return {
-                        'nickname': user_detail.get('nickname', author.get('nickname', '')),
-                        'unique_id': user_detail.get('unique_id', ''),
-                        'follower_count': user_detail.get('follower_count', 0),
-                        'following_count': user_detail.get('following_count', 0),
-                        'total_favorited': user_detail.get('total_favorited', 0),
-                        'aweme_count': user_detail.get('aweme_count', 0),
-                        'signature': user_detail.get('signature', ''),
-                        'sec_uid': sec_uid,
-                        'avatar_thumb': user_detail.get('avatar_thumb', {}).get('url_list', [''])[0] if user_detail.get('avatar_thumb') else '',
-                        'avatar_larger': user_detail.get('avatar_larger', {}).get('url_list', [''])[0] if user_detail.get('avatar_larger') else ''
-                    }
-
-                return {
-                    'nickname': author.get('nickname', ''),
-                    'unique_id': '',
-                    'follower_count': 0,
-                    'following_count': 0,
-                    'total_favorited': 0,
-                    'aweme_count': 0,
-                    'signature': '',
-                    'sec_uid': sec_uid,
-                    'avatar_thumb': author.get('avatar_thumb', {}).get('url_list', [''])[0] if author.get('avatar_thumb') else '',
-                }
-
-            author_results = await asyncio.gather(
-                *(load_author_detail(sec_uid, author) for sec_uid, author in unique_authors),
-                return_exceptions=True,
-            )
-
-            authors = []
-            for result in author_results:
-                if isinstance(result, dict):
-                    authors.append(result)
-
-            return authors
-        except Exception as e:
-            if self.debug_mode:
-                print(f"\033[91m[UserManager] 获取点赞作者时出错: {e}\033[0m")
-            else:
-                print(f"\033[91m获取点赞作者时出错: {e}\033[0m")
-            return []
+        return await self.favorites.get_liked_authors(count)
 
     async def download_liked_authors(self, count=20, selected_sec_uids=None):
-        """下载点赞作品的作者的所有作品"""
-        try:
-            authors = await self.get_liked_authors(count)
-            if isinstance(authors, dict):
-                return 0
-            if not authors:
-                return 0
-
-            selected = set(selected_sec_uids or [])
-            selected_authors = [
-                author for author in authors
-                if not selected or author.get('sec_uid') in selected
-            ]
-
-            max_workers = max(1, int(getattr(Config, 'MAX_CONCURRENT', 3) or 1))
-            semaphore = asyncio.Semaphore(max_workers)
-
-            async def download_one_author(author: dict) -> int:
-                async with semaphore:
-                    print(f"\n\033[36m正在处理作者: {author['nickname']}\033[0m")
-                    await self.download_user_videos(author, auto_confirm=True)
-                return 1
-
-            results = await asyncio.gather(
-                *(download_one_author(author) for author in selected_authors),
-                return_exceptions=True,
-            )
-            return sum(result for result in results if isinstance(result, int))
-
-        except Exception as e:
-            print(f"\033[91m处理失败：{str(e)}\033[0m")
-            return 0
+        return await self.favorites.download_liked_authors(count, selected_sec_uids)
