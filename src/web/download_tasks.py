@@ -480,6 +480,7 @@ def download_user_video():
                             break
 
                         aweme_id = post['aweme_id']
+                        desc = post.get('desc', '')
                         media_type, urls = user_manager.get_media_info(post)
                         name = dr._build_download_name(
                             _nickname,
