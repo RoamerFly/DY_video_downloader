@@ -27,6 +27,7 @@ def _deps():
 @downloads_bp.route('/api/download_single_video', methods=['POST'])
 def download_single_video():
     """下载单个作品（视频、图集或Live Photo）"""
+    dr = _deps()
     try:
         data = dr._request_json()
         aweme_id = data.get('aweme_id', '').strip()
@@ -67,9 +68,9 @@ def download_single_video():
         if should_refresh_video_media and aweme_id:
             detail = dr._run_async(user_manager.get_video_detail(aweme_id))
             if isinstance(detail, dict) and detail.get('_need_verify'):
-                return jsonify(_verify_error_response(detail, '需要完成滑块验证'))
+                return jsonify(dr._verify_error_response(detail, '需要完成滑块验证'))
             if isinstance(detail, dict) and detail.get('_need_login'):
-                return jsonify(_login_error_response(detail))
+                return jsonify(dr._login_error_response(detail))
 
             if detail:
                 video_create_time = detail.get('create_time') or video_create_time
@@ -298,6 +299,7 @@ def download_single_video():
 @downloads_bp.route('/api/download_user_video', methods=['POST'])
 def download_user_video():
     """通过sec_uid下载用户所有视频，支持WebSocket进度反馈"""
+    dr = _deps()
     dr._logger.debug("Received download_user_video request")
     try:
         data = dr._request_json()
