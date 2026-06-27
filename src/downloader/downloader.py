@@ -12,6 +12,7 @@ from src.config.config import Config
 from src.api.api import DouyinAPI
 from src.downloader.download_records import DownloadRecords
 from src.downloader.file_paths import FilePaths
+from src.downloader.progress import Progress
 from src.downloader.filename_builder import (
     build_download_name,
     build_download_title,
@@ -41,14 +42,6 @@ def _get_session():
     return session
 
 
-def _redact_headers(headers: dict) -> dict:
-    redacted = dict(headers)
-    for key in list(redacted.keys()):
-        if key.lower() in ('cookie', 'authorization'):
-            redacted[key] = '<redacted>'
-    return redacted
-
-
 def _is_dash_video_only_url(url: str) -> bool:
     text = str(url or '').strip().lower()
     return 'media-video' in text or 'media_video' in text
@@ -76,6 +69,8 @@ class DouyinDownloader:
         self._records: DownloadRecords | None = None
         # 文件路径/扩展名处理服务（延迟初始化）
         self._file_paths: FilePaths | None = None
+        # 下载进度/请求头辅助服务（延迟初始化）
+        self._progress: Progress | None = None
 
         self._ensure_download_dirs()
 
@@ -92,6 +87,13 @@ class DouyinDownloader:
         if self._file_paths is None:
             self._file_paths = FilePaths(self)
         return self._file_paths
+
+    @property
+    def progress(self) -> Progress:
+        """获取下载进度/请求头辅助服务实例（懒加载）。"""
+        if self._progress is None:
+            self._progress = Progress(self)
+        return self._progress
 
     # ---------- 下载记录薄代理（委托给 DownloadRecords） ----------
 
@@ -136,42 +138,10 @@ class DouyinDownloader:
         self.records._save_download_record(user_dir, aweme_id)
 
     def _get_download_headers(self):
-        """获取下载用的请求头"""
-        headers = Config.COMMON_HEADERS.copy()
-        headers.update({
-            'Accept': '*/*',
-            'Accept-Encoding': 'identity;q=1, *;q=0',
-            'Range': 'bytes=0-',
-            'Referer': 'https://www.douyin.com/'
-        })
-        
-        # 只有在有cookie的情况下才添加cookie
-        if self.api.cookie:
-            if self.debug_mode:
-                print(f"\033[93m[Downloader] 添加Cookie到下载请求头\033[0m")
-            headers['Cookie'] = self.api.cookie
-        elif self.debug_mode:
-            print(f"\033[93m[Downloader] 无Cookie可用于下载请求\033[0m")
-            
-        if self.debug_mode:
-            print(f"\033[93m[Downloader] 下载请求头: {_redact_headers(headers)}\033[0m")
-            
-        return headers
+        return self.progress._get_download_headers()
 
     def _get_response_size(self, response) -> int:
-        """从响应头获取文件大小，取不到时返回 0。"""
-        content_length = response.headers.get('Content-Length')
-        if content_length and content_length.isdigit():
-            return int(content_length)
-
-        content_range = response.headers.get('Content-Range', '')
-        if '/' in content_range:
-            total = content_range.rsplit('/', 1)[-1]
-            if total.isdigit():
-                return int(total)
-
-        return 0
-
+        return self.progress._get_response_size(response)
     def _extension_for_media(self, file_type: str, url: str, response=None) -> str:
         return self.file_paths._extension_for_media(file_type, url, response)
 
@@ -179,25 +149,10 @@ class DouyinDownloader:
         return self.file_paths._unique_filepath(directory, filename, extension)
 
     def _emit_download_progress(self, socketio, task_id, progress_callback=None, **payload):
-        """同时兼容旧 download_progress 事件和新的批量当前作品回调。"""
-        if socketio and task_id:
-            socketio.emit('download_progress', {
-                'task_id': task_id,
-                **payload
-            })
-
-        if progress_callback:
-            try:
-                progress_callback(payload)
-            except Exception as e:
-                if self.debug_mode:
-                    print(f"\033[91m[Downloader] 进度回调失败: {str(e)}\033[0m")
+        return self.progress._emit_download_progress(socketio, task_id, progress_callback, **payload)
 
     def _wait_if_paused(self, pause_event=None, cancel_event=None):
-        if not pause_event:
-            return
-        while pause_event.is_set() and not (cancel_event and cancel_event.is_set()):
-            time.sleep(0.2)
+        return self.progress._wait_if_paused(pause_event, cancel_event)
 
     def _split_download_name(self, name: str) -> tuple[str, str]:
         return self.file_paths._split_download_name(name)
