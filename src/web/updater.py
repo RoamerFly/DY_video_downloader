@@ -20,6 +20,8 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
+from src.web import update_checker
+
 # 注入的依赖
 _logger = None
 _Config = None
@@ -67,94 +69,31 @@ def setup_updater(
 
 
 def normalize_version_text(version: str) -> str:
-    return str(version or '').strip().lstrip('vV')
+    return update_checker.normalize_version_text(version)
 
 
 def _parse_version_parts(version: str) -> tuple[int, ...]:
-    parts = [int(part) for part in re.findall(r'\d+', normalize_version_text(version))]
-    return tuple(parts) if parts else (0,)
+    return update_checker._parse_version_parts(version)
 
 
 def is_newer_version(latest_version: str, current_version: str) -> bool:
-    latest = _parse_version_parts(latest_version)
-    current = _parse_version_parts(current_version)
-    max_len = max(len(latest), len(current))
-    latest += (0,) * (max_len - len(latest))
-    current += (0,) * (max_len - len(current))
-    return latest > current
+    return update_checker.is_newer_version(latest_version, current_version)
 
 
 def get_current_app_version() -> str:
-    env_version = normalize_version_text(os.environ.get('APP_VERSION') or os.environ.get('GITHUB_REF_NAME') or '')
-    if env_version:
-        return env_version
-
-    config_version = normalize_version_text(getattr(_Config, 'APP_VERSION', ''))
-    if config_version:
-        return config_version
-
-    try:
-        result = subprocess.run(
-            ['git', 'describe', '--tags', '--always', '--dirty'],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=str(Path(__file__).resolve().parents[2]),
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return normalize_version_text(result.stdout.strip())
-    except Exception:
-        pass
-
-    return '0.0.13'
+    return update_checker.get_current_app_version(_Config)
 
 
 def fetch_latest_release() -> dict:
-    response = _http_requests.get(
-        _LATEST_RELEASE_API_URL,
-        headers={
-            'Accept': 'application/vnd.github+json',
-            'User-Agent': f'better-douyin/{get_current_app_version()}',
-        },
-        timeout=(5, 15),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise ValueError('GitHub release payload invalid')
-    return payload
+    return update_checker.fetch_latest_release(_http_requests, _LATEST_RELEASE_API_URL, _Config)
 
 
 def fetch_updater_metadata() -> dict | None:
-    try:
-        response = _http_requests.get(
-            _UPDATER_METADATA_URL,
-            headers={
-                'Accept': 'application/json',
-                'User-Agent': f'better-douyin/{get_current_app_version()}',
-            },
-            timeout=(5, 15),
-        )
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        payload = response.json()
-        return payload if isinstance(payload, dict) else None
-    except Exception as exc:
-        _logger.debug(f"读取更新签名元数据失败，回退到 GitHub Release API: {exc}")
-        return None
+    return update_checker.fetch_updater_metadata(_http_requests, _UPDATER_METADATA_URL, _logger, _Config)
 
 
 def normalize_update_notes(notes: str) -> str:
-    text = str(notes or '').strip()
-    if not text:
-        return ''
-    for pattern in (r'\n##\s*下载建议\b', r'\n##\s*Download\b'):
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            text = text[:match.start()].strip()
-            break
-    return text
+    return update_checker.normalize_update_notes(notes)
 
 
 def _linux_package_family() -> str:
