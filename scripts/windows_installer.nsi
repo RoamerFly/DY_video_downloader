@@ -33,6 +33,17 @@ SetCompressor /SOLID lzma
 Section "Install" SecInstall
     SectionIn RO
 
+    ; 检查程序是否在运行
+    DetectRunning:
+        IfFileExists "$INSTDIR\${APP_EXE}" 0 EndDetectRunning
+        ClearErrors
+        FileOpen $0 "$INSTDIR\${APP_EXE}" "a"
+        FileClose $0
+        IfErrors 0 EndDetectRunning
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行，请先关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
+        Abort
+    EndDetectRunning:
+
     ; 设置输出路径
     SetOutPath "$INSTDIR"
 
@@ -64,6 +75,17 @@ SectionEnd
 
 ; 卸载
 Section "Uninstall"
+    ; 检查程序是否在运行
+    DetectRunning:
+        IfFileExists "$INSTDIR\${APP_EXE}" 0 EndDetectRunning
+        ClearErrors
+        FileOpen $0 "$INSTDIR\${APP_EXE}" "a"
+        FileClose $0
+        IfErrors 0 EndDetectRunning
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行，请先关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
+        Abort
+    EndDetectRunning:
+
     ; 删除文件
     RMDir /r "$INSTDIR"
 
