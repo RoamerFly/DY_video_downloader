@@ -17,6 +17,7 @@ import {
   Gauge,
   Heart,
   Info,
+  ListVideo,
   Loader2,
   MessageCircle,
   Music,
@@ -96,6 +97,13 @@ import {
   type PlayerPanel,
 } from "./player-utils";
 
+const AUTO_PLAY_NEXT_VIDEO_STORAGE_KEY = "player_auto_play_next_video";
+
+function readStoredAutoPlayNextVideo(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(AUTO_PLAY_NEXT_VIDEO_STORAGE_KEY) === "true";
+}
+
 interface FullscreenPlayerProps {
   videos: VideoInfo[];
   initialIndex?: number;
@@ -122,7 +130,7 @@ export function FullscreenPlayer({
   onVideoUpdate,
 }: FullscreenPlayerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const [mediaIndex, setMediaIndex] = useState(0);
+  const [mediaTransition, setMediaTransition] = useState({ index: 0, direction: 0 });
   const [playing, setPlaying] = useState(false);
   const [liked, setLiked] = useState(false);
   const [favorited, setFavorited] = useState(false);
@@ -140,6 +148,7 @@ export function FullscreenPlayer({
   const [reloadKey, setReloadKey] = useState(0);
   const [bgmPlaying, setBgmPlaying] = useState(false);
   const [downloadSubmitting, setDownloadSubmitting] = useState(false);
+  const [autoPlayNextVideo, setAutoPlayNextVideo] = useState(readStoredAutoPlayNextVideo);
   const [shareFriends, setShareFriends] = useState<ShareFriend[]>([]);
   const [shareFriendsLoading, setShareFriendsLoading] = useState(false);
   const [shareFriendsError, setShareFriendsError] = useState("");
@@ -161,7 +170,6 @@ export function FullscreenPlayer({
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentReplyTarget, setCommentReplyTarget] = useState<CommentReplyTarget>(null);
   const [videoOverrides, setVideoOverrides] = useState<Record<string, VideoInfo>>({});
-  const [mediaTransitionDirection, setMediaTransitionDirection] = useState(0);
   const [navigationNotice, setNavigationNotice] = useState("");
   const playerRootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -229,6 +237,8 @@ export function FullscreenPlayer({
     Math.max(initialMediaIndex, 0),
     Math.max(mediaItems.length - 1, 0)
   );
+  const mediaIndex = mediaTransition.index;
+  const mediaTransitionDirection = mediaTransition.direction;
   const activeMediaIndex = isOpeningRender ? safeInitialMediaIndexForOpen : mediaIndex;
   const currentMedia = mediaItems[activeMediaIndex] || mediaItems[0] || null;
   const qualityOptions = useMemo(
@@ -369,9 +379,8 @@ export function FullscreenPlayer({
     clearLoadTimers();
     stopVideoProgressLoop();
     releaseMediaElement(videoRef.current);
-    setMediaTransitionDirection(0);
     setCurrentIndex(index);
-    setMediaIndex(0);
+    setMediaTransition({ index: 0, direction: 0 });
     setCurrentTime(0);
     setDuration(0);
     progressSampleRef.current = 0;
@@ -649,28 +658,27 @@ export function FullscreenPlayer({
     }, 650);
   }, []);
 
-  const switchToMedia = useCallback((index: number) => {
+  const switchToMedia = useCallback((index: number, explicitDirection?: number) => {
     if (mediaItems.length === 0) return;
     mediaAdvanceSeqRef.current += 1;
     const safeIndex = ((index % mediaItems.length) + mediaItems.length) % mediaItems.length;
-    const direction = resolveMediaDirection(mediaIndex, safeIndex, mediaItems.length);
+    const direction = explicitDirection ?? resolveMediaDirection(mediaIndex, index, mediaItems.length);
     const shouldKeepPlaying = desiredPlayingRef.current || playing;
     desiredPlayingRef.current = shouldKeepPlaying;
     mediaSwitchingRef.current = true;
     if (mediaSwitchReleaseRef.current) {
       window.clearTimeout(mediaSwitchReleaseRef.current);
     }
-    setMediaIndex(safeIndex);
-    setMediaTransitionDirection(direction);
+    setMediaTransition({ index: safeIndex, direction });
     setCurrentTime(0);
     setDuration(0);
     progressSampleRef.current = 0;
     setPlaying(shouldKeepPlaying);
-  }, [mediaItems.length, playing]);
+  }, [mediaIndex, mediaItems.length, playing]);
 
   const playNextMedia = useCallback(() => {
     if (mediaItems.length > 1) {
-      switchToMedia(mediaIndex + 1);
+      switchToMedia(mediaIndex + 1, 1);
       return;
     }
     playNextVideo();
@@ -678,7 +686,7 @@ export function FullscreenPlayer({
 
   const playPrevMedia = useCallback(() => {
     if (mediaItems.length > 1) {
-      switchToMedia(mediaIndex - 1);
+      switchToMedia(mediaIndex - 1, -1);
       return;
     }
     playPrevVideo();
@@ -687,12 +695,16 @@ export function FullscreenPlayer({
   const advanceMediaSequence = useCallback(() => {
     if (mediaItems.length === 0) return;
     desiredPlayingRef.current = true;
+    if (autoPlayNextVideo && videos.length > 1) {
+      playNextVideo();
+      return;
+    }
     if (mediaItems.length > 1) {
       const nextIndex = (mediaIndex + 1) % mediaItems.length;
       const nextMedia = mediaItems[nextIndex];
       const nextTarget = resolvePreloadTarget(nextMedia);
       if (nextTarget && preloadedReadyRef.current.has(nextTarget.key)) {
-        switchToMedia(nextIndex);
+        switchToMedia(nextIndex, 1);
         return;
       }
       const requestSeq = ++mediaAdvanceSeqRef.current;
@@ -700,7 +712,7 @@ export function FullscreenPlayer({
       setPlaying(true);
       void waitForMediaReady(nextMedia).then(() => {
         if (requestSeq !== mediaAdvanceSeqRef.current) return;
-        switchToMedia(nextIndex);
+        switchToMedia(nextIndex, 1);
       });
       return;
     }
@@ -709,7 +721,15 @@ export function FullscreenPlayer({
     setDuration(IMAGE_DURATION_SECONDS);
     setPlaying(true);
     setReloadKey((value) => value + 1);
-  }, [mediaIndex, mediaItems, resolvePreloadTarget, switchToMedia, waitForMediaReady]);
+  }, [autoPlayNextVideo, mediaIndex, mediaItems, playNextVideo, resolvePreloadTarget, switchToMedia, videos.length, waitForMediaReady]);
+
+  const toggleAutoPlayNextVideo = useCallback(() => {
+    setAutoPlayNextVideo((current) => {
+      const next = !current;
+      window.localStorage.setItem(AUTO_PLAY_NEXT_VIDEO_STORAGE_KEY, String(next));
+      return next;
+    });
+  }, []);
 
   const requestAdvanceMediaSequence = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1606,7 +1626,7 @@ export function FullscreenPlayer({
         ...current,
         [awemeId]: result.video as VideoInfo,
       }));
-      setMediaIndex(0);
+      setMediaTransition({ index: 0, direction: 0 });
       setCurrentTime(0);
       setDuration(0);
       setReloadKey((value) => value + 1);
@@ -1792,9 +1812,8 @@ export function FullscreenPlayer({
     );
     desiredPlayingRef.current = true;
     mediaSwitchingRef.current = false;
-    setMediaTransitionDirection(0);
     setCurrentIndex(safeIndex);
-    setMediaIndex(safeMediaIndex);
+    setMediaTransition({ index: safeMediaIndex, direction: 0 });
     setCurrentTime(0);
     setDuration(0);
     progressSampleRef.current = 0;
@@ -1881,7 +1900,7 @@ export function FullscreenPlayer({
 
   useEffect(() => {
     if (mediaIndex < mediaItems.length) return;
-    setMediaIndex(0);
+    setMediaTransition({ index: 0, direction: 0 });
   }, [mediaIndex, mediaItems.length]);
 
   useEffect(() => {
@@ -2247,7 +2266,7 @@ export function FullscreenPlayer({
                 initial="enter"
                 animate="center"
                 exit="exit"
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
                 className="absolute inset-0 flex items-center justify-center"
                 style={{ backfaceVisibility: "hidden", contain: "layout paint", willChange: "transform" }}
               >
@@ -2257,7 +2276,7 @@ export function FullscreenPlayer({
                     src={currentMediaSrc}
 	                    className="pointer-events-none h-full max-h-full w-full max-w-full object-contain"
                     autoPlay={shouldAutoPlayCurrentMedia}
-                    loop={!hasMultipleMedia}
+                    loop={!hasMultipleMedia && !autoPlayNextVideo}
                     playsInline
                     muted={shouldUseBgmForCurrentMedia || muted || volume === 0}
 	                    preload={hasMultipleMedia ? "auto" : "metadata"}
@@ -2488,6 +2507,18 @@ export function FullscreenPlayer({
               </button>
 
               <div className="flex min-w-0 max-w-[66vw] items-center gap-1 overflow-visible pb-0.5">
+                <InlinePlayerButton
+                  label={autoPlayNextVideo ? "关闭自动播放下一条" : "自动播放下一条"}
+                  active={autoPlayNextVideo}
+                  activeClassName="text-accent"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleAutoPlayNextVideo();
+                  }}
+                >
+                  <ListVideo className={cn("h-4 w-4", autoPlayNextVideo && "text-accent")} />
+                </InlinePlayerButton>
+
                 <InlinePlayerButton
                   label="点赞"
                   count={likeCount}
@@ -3296,4 +3327,3 @@ export function FullscreenPlayer({
     </AnimatePresence>
   );
 }
-
