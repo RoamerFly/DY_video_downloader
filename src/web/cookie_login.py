@@ -538,19 +538,28 @@ def cookie_browser_login_status_sync():
 
     if event == 'cookies_polled':
         raw_cookies = data.get('cookies') or []
+        _logger.info('[IPC] cookies_polled received: %d raw cookies', len(raw_cookies))
         entries = normalize_cookie_entries(raw_cookies)
+        _logger.info('[IPC] normalized entries: %d', len(entries))
         if not has_login_cookie(entries):
             return jsonify({'success': True})
 
         cookie_string = serialize_cookie_entries(entries)
+        _logger.info('[IPC] cookie_string length: %d', len(cookie_string))
         if not cookie_string:
             return jsonify({'success': True})
 
         relation_signer = extract_relation_signer_entries(entries)
         current_user_profile = extract_current_user_profile_entries(entries)
+        _logger.info('[IPC] current_user_profile from cookie: %s', current_user_profile)
 
         # 校验登录状态并获取账号详细资料 (sec_uid, nickname 等)
+        _emit_cookie_login_status('pending', '已检测到登录 Cookie，正在校验登录状态')
         verify_result = _verify_native_cookie_login(cookie_string)
+        _logger.info('[IPC] verify_result: success=%s sec_uid=%s nickname=%s',
+                     verify_result.get('success'),
+                     verify_result.get('sec_uid', ''),
+                     verify_result.get('nickname', ''))
         if not verify_result.get('success'):
             _logger.info('原生登录窗口候选 Cookie 校验未通过: %s', verify_result.get('message', 'unknown'))
             return jsonify({'success': True})
@@ -581,6 +590,16 @@ def cookie_browser_login_status_sync():
                 "nickname": verify_result.get("nickname") or "",
             }
 
+        # 将 verify_result 中的头像信息也合并进来
+        for avatar_key in ('avatar_thumb', 'avatar_medium', 'avatar_larger'):
+            avatar_val = verify_result.get(avatar_key) or ''
+            if avatar_val and not current_user_profile.get(avatar_key):
+                current_user_profile[avatar_key] = avatar_val
+
+        _logger.info('[IPC] final current_user_profile: sec_uid=%s nickname=%s',
+                     current_user_profile.get('sec_uid', ''),
+                     current_user_profile.get('nickname', ''))
+
         nickname = current_user_profile.get('nickname', '')
         _save_cookie_login_success(
             cookie=cookie_string,
@@ -588,6 +607,10 @@ def cookie_browser_login_status_sync():
             relation_signer=relation_signer,
             current_user_profile=current_user_profile,
         )
+
+        _logger.info('[IPC] _save_cookie_login_success completed. ACCOUNTS=%d CURRENT_SEC_UID=%s',
+                     len(getattr(_Config, 'ACCOUNTS', [])),
+                     getattr(_Config, 'CURRENT_SEC_UID', ''))
 
         # 成功登录，通知主进程关闭登录窗口
         if _gui_queue is not None:
