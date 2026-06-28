@@ -104,6 +104,25 @@ function readStoredAutoPlayNextVideo(): boolean {
   return window.localStorage.getItem(AUTO_PLAY_NEXT_VIDEO_STORAGE_KEY) === "true";
 }
 
+function buildAudioDownloadVideo(video: VideoInfo, audioUrl: string): VideoInfo {
+  const title = video.music?.title || video.desc || video.aweme_id;
+  return {
+    ...video,
+    desc: title ? `${title} 音频` : "背景音乐",
+    media_type: "audio",
+    raw_media_type: "audio",
+    media_urls: [{ type: "audio", url: audioUrl }],
+    video: {
+      ...video.video,
+      audio_addr: audioUrl,
+      play_addr: audioUrl,
+      play_addr_h264: null,
+      play_addr_lowbr: null,
+      download_addr: audioUrl,
+    },
+  };
+}
+
 interface FullscreenPlayerProps {
   videos: VideoInfo[];
   initialIndex?: number;
@@ -148,6 +167,7 @@ export function FullscreenPlayer({
   const [reloadKey, setReloadKey] = useState(0);
   const [bgmPlaying, setBgmPlaying] = useState(false);
   const [downloadSubmitting, setDownloadSubmitting] = useState(false);
+  const [bgmDownloadSubmitting, setBgmDownloadSubmitting] = useState(false);
   const [autoPlayNextVideo, setAutoPlayNextVideo] = useState(readStoredAutoPlayNextVideo);
   const [shareFriends, setShareFriends] = useState<ShareFriend[]>([]);
   const [shareFriendsLoading, setShareFriendsLoading] = useState(false);
@@ -1574,6 +1594,22 @@ export function FullscreenPlayer({
       pauseBgm();
     }
   }, [ensureBgmSource, pauseBgm, playBgm]);
+
+  const handleDownloadBgm = useCallback(async (event: ReactMouseEvent) => {
+    event.stopPropagation();
+    clearPanelCloseTimer();
+    setOpenPanel(null);
+    if (!musicUrl || !currentVideo || !onDownload || bgmDownloadSubmitting) return;
+
+    setBgmDownloadSubmitting(true);
+    try {
+      await Promise.resolve(onDownload(buildAudioDownloadVideo(currentVideo, musicUrl)));
+    } catch (error) {
+      console.warn("BGM download failed", error);
+    } finally {
+      setBgmDownloadSubmitting(false);
+    }
+  }, [bgmDownloadSubmitting, clearPanelCloseTimer, currentVideo, musicUrl, onDownload, setOpenPanel]);
 
   const handleSeek = useCallback((nextTime: number) => {
     if (!duration) return;
@@ -3261,15 +3297,15 @@ export function FullscreenPlayer({
                               {bgmPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 fill-current" />}
                               {bgmPlaying ? "暂停 BGM" : "播放 BGM"}
                             </button>
-                            <a
-                              href={bgmProxyUrl}
-                              download
+                            <button
+                              type="button"
+                              disabled={bgmDownloadSubmitting || !bgmProxyUrl || !onDownload}
                               className="flex h-8 items-center justify-center gap-1 rounded-md bg-white/[0.08] text-[0.72rem] font-semibold text-white/80 transition-colors hover:bg-white/15 hover:text-white"
-                              onClick={(event) => event.stopPropagation()}
+                              onClick={handleDownloadBgm}
                             >
-                              <Download className="h-3.5 w-3.5" />
-                              下载
-                            </a>
+                              {bgmDownloadSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                              {bgmDownloadSubmitting ? "加入中" : "下载"}
+                            </button>
                           </div>
                         ) : (
                           <div className="rounded-md bg-white/[0.06] px-2 py-2 text-[0.72rem] text-white/55">
