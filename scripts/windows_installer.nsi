@@ -34,6 +34,10 @@ SetCompressor /SOLID lzma
 Section "Install" SecInstall
     SectionIn RO
 
+    ; 尝试强制结束正在运行的程序进程
+    nsExec::Exec 'taskkill /F /IM "${APP_EXE}" /T'
+    Sleep 500
+
     ; 检查程序是否在运行
     DetectRunning:
         IfFileExists "$INSTDIR\${APP_EXE}" 0 EndDetectRunning
@@ -41,7 +45,7 @@ Section "Install" SecInstall
         FileOpen $0 "$INSTDIR\${APP_EXE}" "a"
         FileClose $0
         IfErrors 0 EndDetectRunning
-        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行，请先关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行且无法自动关闭，请手动关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
         Abort
     EndDetectRunning:
 
@@ -76,6 +80,10 @@ SectionEnd
 
 ; 卸载
 Section "Uninstall"
+    ; 尝试强制结束正在运行的程序进程
+    nsExec::Exec 'taskkill /F /IM "${APP_EXE}" /T'
+    Sleep 500
+
     ; 检查程序是否在运行
     DetectRunning:
         IfFileExists "$INSTDIR\${APP_EXE}" 0 EndDetectRunning
@@ -83,7 +91,7 @@ Section "Uninstall"
         FileOpen $0 "$INSTDIR\${APP_EXE}" "a"
         FileClose $0
         IfErrors 0 EndDetectRunning
-        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行，请先关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "${APP_NAME} 正在运行且无法自动关闭，请手动关闭正在运行的程序，然后点击重试。" IDRETRY DetectRunning
         Abort
     EndDetectRunning:
 
