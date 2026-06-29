@@ -162,7 +162,7 @@ export function Sidebar() {
           collapsed && "items-center"
         )}
       >
-        <div className={cn("mb-2 flex h-8 shrink-0 items-center", collapsed ? "justify-center" : "justify-between px-[3px]")}>
+        <div className={cn("mb-2 flex h-8 shrink-0 items-center", collapsed ? "justify-center" : "justify-start px-[3px]")}>
           {collapsed ? (
             <button
               type="button"
@@ -183,7 +183,7 @@ export function Sidebar() {
                 aria-label="收起侧边栏"
                 title="收起侧边栏"
                 onClick={toggleCollapsed}
-                className="flex h-7 w-7 items-center justify-center rounded-[9px] text-text-muted transition-[background-color,color,transform] hover:bg-surface-raised hover:text-text active:scale-95"
+                className="ml-10 flex h-7 w-7 items-center justify-center rounded-[9px] text-text-muted transition-[background-color,color,transform] hover:bg-surface-raised hover:text-text active:scale-95"
               >
                 <PanelLeftClose className="h-4 w-4" />
               </button>
