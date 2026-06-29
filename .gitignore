@@ -93,6 +93,12 @@ temp/
 !img/preview/
 !img/preview/*.jpg
 
+# 前端打包资源图片需要提交
+!frontend/src/assets/
+!frontend/src/assets/*.jpg
+!frontend/src/assets/*.jpeg
+!frontend/src/assets/*.png
+
 # 备份文件
 *.bak
 *.backup
