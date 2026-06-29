@@ -23,7 +23,7 @@ import {
   addAccount,
 } from "@/lib/tauri";
 import type { AccountInfo } from "@/lib/tauri";
-import type { ThemeMode } from "@/types";
+import type { ThemeMode, FontSizeMode } from "@/types";
 import type {
   LoginStatus,
   SavingFields,
@@ -40,6 +40,8 @@ import { SettingGroup } from "./settings-components";
 export function SettingsView() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const fontSize = useAppStore((s) => s.fontSize);
+  const setFontSize = useAppStore((s) => s.setFontSize);
   const cookieLoggedIn = useAppStore((s) => s.cookieLoggedIn);
   const cookieNickname = useAppStore((s) => s.cookieNickname);
   const setCookieLoggedIn = useAppStore((s) => s.setCookieLoggedIn);
@@ -448,6 +450,11 @@ export function SettingsView() {
     reportSettingSaved("theme", "外观主题已保存");
   };
 
+  const handleFontSizeChange = async (value: FontSizeMode) => {
+    setFontSize(value);
+    reportSettingSaved("font_size", "字体大小已保存");
+  };
+
   const handleQualityChange = async (value: string) => {
     const previousQuality = savedSettingsRef.current.downloadQuality;
     setDownloadQuality(value);
@@ -757,7 +764,7 @@ export function SettingsView() {
               )}
 
               {activeTab === "preferences" && (
-                <SettingsAppearanceTab theme={theme} savingFields={savingFields} fieldStatus={fieldStatus} handleThemeChange={handleThemeChange} />
+                <SettingsAppearanceTab theme={theme} fontSize={fontSize} savingFields={savingFields} fieldStatus={fieldStatus} handleThemeChange={handleThemeChange} handleFontSizeChange={handleFontSizeChange} />
               )}
 
               {activeTab === "about" && (
