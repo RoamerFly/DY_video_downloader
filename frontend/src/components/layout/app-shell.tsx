@@ -50,7 +50,15 @@ export function AppShell() {
             } as React.CSSProperties & { WebkitAppRegion: string }}
           />
         )}
-        <div ref={scrollRef} className="relative flex-1 overflow-x-hidden overflow-y-auto pb-16 pt-2 rounded-t-[24px]">
+        <div
+          ref={scrollRef}
+          className={cn(
+            "relative flex-1 overflow-x-hidden rounded-t-[24px]",
+            currentView === "friends-status"
+              ? "flex flex-col overflow-y-hidden pb-14 pt-2"
+              : "overflow-y-auto pb-16 pt-2"
+          )}
+        >
           <AnimatePresence initial={false} mode="popLayout">
             {renderView(currentView)}
           </AnimatePresence>
