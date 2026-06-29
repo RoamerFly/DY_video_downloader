@@ -15,6 +15,7 @@ from src.user.video_details import VideoDetailsService
 # 移除增强下载器支持
 ENHANCED_DOWNLOADER_AVAILABLE = False
 EnhancedDouyinDownloader = None
+USER_POST_PAGE_SIZE = 20
 
 class DouyinUserManager:
     """抖音用户管理类"""
@@ -265,7 +266,8 @@ class DouyinUserManager:
         has_more = True
         
         while has_more and len(videos) < limit:
-            request_count = 18 if on_batch is None else min(50, max(18, limit - len(videos)))
+            remaining = max(limit - len(videos), 1)
+            request_count = min(USER_POST_PAGE_SIZE, remaining) if on_batch is not None else min(18, remaining)
             params = {
                 "publish_video_strategy_type": 2,
                 "max_cursor": max_cursor,

@@ -659,8 +659,10 @@ def download_user_video():
                             'type': 'progress'
                         })
 
-                # 获取视频抓取任务（需要能响应取消）
-                fetch_coro = user_manager.get_user_videos(sec_uid, limit=1000, on_batch=on_batch)
+                # 获取视频抓取任务（需要能响应取消）。用户作品数未知时给一个足够大的上限，
+                # 避免“全部作品”被固定 1000 条截断。
+                fetch_limit = max(aweme_count, 10000) if aweme_count > 0 else 10000
+                fetch_coro = user_manager.get_user_videos(sec_uid, limit=fetch_limit, on_batch=on_batch)
                 fetch_task = asyncio.create_task(fetch_coro)
                 consume_tasks = [
                     asyncio.create_task(downloader_consumer())
