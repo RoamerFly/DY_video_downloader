@@ -176,6 +176,7 @@ def get_config():
         'cookie_preview': f"{_Config.COOKIE[:12]}..." if _Config.COOKIE else '',
         'download_quality': getattr(_Config, 'DOWNLOAD_QUALITY', 'auto'),
         'max_concurrent': getattr(_Config, 'MAX_CONCURRENT', 3),
+        'proxy': getattr(_Config, 'PROXY', '') or None,
         'filename_template': getattr(_Config, 'FILENAME_TEMPLATE', '{title}'),
         'folder_name_template': getattr(_Config, 'FOLDER_NAME_TEMPLATE', '{author}'),
         'auto_create_folder': getattr(_Config, 'AUTO_CREATE_FOLDER', True),
@@ -236,6 +237,8 @@ def set_config():
             _Config.DOWNLOAD_QUALITY = _Config.normalize_download_quality(data.get('download_quality'))
         if 'max_concurrent' in data:
             _Config.MAX_CONCURRENT = _coerce_int(data.get('max_concurrent'), 3, 1, 10)
+        if 'proxy' in data:
+            _Config.PROXY = _Config.normalize_proxy(data.get('proxy'))
         if 'filename_template' in data:
             _Config.FILENAME_TEMPLATE = _Config.normalize_filename_template(
                 data.get('filename_template'),
@@ -291,6 +294,7 @@ def set_config():
             _Config.HISTORY_DIRS,
             download_quality=_Config.DOWNLOAD_QUALITY,
             max_concurrent=_Config.MAX_CONCURRENT,
+            proxy=_Config.PROXY,
             filename_template=_Config.FILENAME_TEMPLATE,
             folder_name_template=_Config.FOLDER_NAME_TEMPLATE,
             auto_create_folder=_Config.AUTO_CREATE_FOLDER,
@@ -317,6 +321,7 @@ def set_config():
             'download_roots': [str(root) for root in _get_all_download_roots()],
             'download_quality': _Config.DOWNLOAD_QUALITY,
             'max_concurrent': _Config.MAX_CONCURRENT,
+            'proxy': _Config.PROXY or None,
             'filename_template': _Config.FILENAME_TEMPLATE,
             'folder_name_template': _Config.FOLDER_NAME_TEMPLATE,
             'auto_create_folder': _Config.AUTO_CREATE_FOLDER,

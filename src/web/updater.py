@@ -101,6 +101,10 @@ def normalize_update_notes(notes: str) -> str:
     return update_checker.normalize_update_notes(notes)
 
 
+def update_request_proxies() -> dict | None:
+    return update_checker.update_request_proxies(_Config)
+
+
 def _linux_package_family() -> str:
     """Best-effort Linux package family detection for release asset selection."""
     os_release = Path('/etc/os-release')
@@ -473,7 +477,13 @@ def download_update_asset(
         'asset_name': filename,
     })
 
-    with _http_requests.get(download_url, headers=headers, stream=True, timeout=(10, 60)) as response:
+    with _http_requests.get(
+        download_url,
+        headers=headers,
+        stream=True,
+        proxies=update_request_proxies(),
+        timeout=(10, 60),
+    ) as response:
         response.raise_for_status()
         total = int(response.headers.get('Content-Length') or 0)
 

@@ -85,3 +85,8 @@ def default_cover():
 @static_assets_bp.route('/qq-group.jpg')
 def qq_group():
     return send_frontend_asset('qq-group.jpg', 'image/jpeg')
+
+
+@static_assets_bp.route('/wechat-pay.png')
+def wechat_pay():
+    return send_frontend_asset('wechat-pay.png', 'image/png')

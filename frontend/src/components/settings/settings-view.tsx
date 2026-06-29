@@ -92,6 +92,8 @@ export function SettingsView() {
   const [filenameTemplate, setFilenameTemplate] = useState("{title}_{aweme_id}");
   const [folderNameTemplate, setFolderNameTemplate] = useState("{author}");
   const [autoCreateFolder, setAutoCreateFolder] = useState(true);
+  const [updateProxy, setUpdateProxy] = useState("");
+  const [savingProxy, setSavingProxy] = useState(false);
   const [choosingDirectory, setChoosingDirectory] = useState(false);
   const [savingFields, setSavingFields] = useState<SavingFields>({});
   const [savedFields, setSavedFields] = useState<SavingFields>({});
@@ -104,6 +106,7 @@ export function SettingsView() {
     filenameTemplate: "{title}_{aweme_id}",
     folderNameTemplate: "{author}",
     autoCreateFolder: true,
+    updateProxy: "",
     theme,
   });
 
@@ -147,12 +150,14 @@ export function SettingsView() {
         const nextFilenameTemplate = config.filename_template || "{title}_{aweme_id}";
         const nextFolderNameTemplate = config.folder_name_template || "{author}";
         const nextAutoCreateFolder = config.auto_create_folder ?? true;
+        const nextUpdateProxy = config.proxy || "";
         setDownloadPath(nextDownloadPath);
         setDownloadQuality(nextDownloadQuality);
         setMaxConcurrent(nextMaxConcurrent);
         setFilenameTemplate(nextFilenameTemplate);
         setFolderNameTemplate(nextFolderNameTemplate);
         setAutoCreateFolder(nextAutoCreateFolder);
+        setUpdateProxy(nextUpdateProxy);
         savedSettingsRef.current = {
           ...savedSettingsRef.current,
           downloadPath: nextDownloadPath,
@@ -161,6 +166,7 @@ export function SettingsView() {
           filenameTemplate: nextFilenameTemplate,
           folderNameTemplate: nextFolderNameTemplate,
           autoCreateFolder: nextAutoCreateFolder,
+          updateProxy: nextUpdateProxy,
         };
         if (config.cookie_set) {
           verifyCookie()
@@ -554,6 +560,30 @@ export function SettingsView() {
     }
   };
 
+  const handleSaveUpdateProxy = async (proxy: string | null) => {
+    const nextProxy = (proxy || "").trim();
+    const previousProxy = savedSettingsRef.current.updateProxy;
+    setSavingProxy(true);
+    try {
+      const result = await saveConfig({ proxy: nextProxy || null });
+      if (!result.success) throw new Error(result.message || "保存代理设置失败");
+      savedSettingsRef.current.updateProxy = nextProxy;
+      setUpdateProxy(nextProxy);
+      await initClient().catch(() => {});
+      toast.success(nextProxy ? "更新代理已保存" : "更新代理已清空", "已保存");
+      addLog(nextProxy ? `更新代理已保存: ${nextProxy}` : "更新代理已清空", "success");
+      return true;
+    } catch (error) {
+      setUpdateProxy(previousProxy);
+      const message = error instanceof Error ? error.message : "保存代理设置失败";
+      toast.error(message, "保存失败");
+      addLog(message, "error");
+      return false;
+    } finally {
+      setSavingProxy(false);
+    }
+  };
+
   const appendFilenameToken = (token: string) => {
     const separator = filenameTemplate.trim() ? "_" : "";
     setFilenameTemplate(`${filenameTemplate}${separator}${token}`);
@@ -768,7 +798,7 @@ export function SettingsView() {
               )}
 
               {activeTab === "about" && (
-                <SettingsAboutTab appVersion={appVersion} updateStatus={updateStatus} updateMessage={updateMessage} updateInfo={updateInfo} updateProgress={updateProgress} updateCanRestart={updateCanRestart} handleCheckUpdate={handleCheckUpdate} handleDownloadUpdate={handleDownloadUpdate} handleRestart={handleRestart} />
+                <SettingsAboutTab appVersion={appVersion} updateStatus={updateStatus} updateMessage={updateMessage} updateInfo={updateInfo} updateProgress={updateProgress} updateCanRestart={updateCanRestart} handleCheckUpdate={handleCheckUpdate} handleDownloadUpdate={handleDownloadUpdate} handleRestart={handleRestart} updateProxy={updateProxy} savingProxy={savingProxy} handleSaveUpdateProxy={handleSaveUpdateProxy} />
               )}
             </motion.div>
           </AnimatePresence>
@@ -777,4 +807,3 @@ export function SettingsView() {
     </motion.div>
   );
 }
-

@@ -727,6 +727,7 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function saveConfig(config: Partial<AppConfig>): Promise<{ success: boolean; message: string }> {
+  const hasProxyPatch = Object.prototype.hasOwnProperty.call(config, "proxy");
   if (shouldUseBrowserBridge()) {
     const current = await getConfig().catch(() => ({} as Partial<AppConfig>));
     const payload: Record<string, unknown> = {
@@ -741,7 +742,7 @@ export async function saveConfig(config: Partial<AppConfig>): Promise<{ success:
         config.im_friend_include_all_users ?? current.im_friend_include_all_users ?? false,
       im_friend_refresh_interval_seconds:
         config.im_friend_refresh_interval_seconds ?? current.im_friend_refresh_interval_seconds ?? 30,
-      proxy: config.proxy ?? current.proxy ?? null,
+      proxy: hasProxyPatch ? (config.proxy ?? null) : (current.proxy ?? null),
     };
     if (typeof config.cookie === "string") {
       payload.cookie = config.cookie;
@@ -761,7 +762,7 @@ export async function saveConfig(config: Partial<AppConfig>): Promise<{ success:
     auto_create_folder: config.auto_create_folder ?? current.auto_create_folder ?? true,
     folder_name_template: config.folder_name_template ?? current.folder_name_template ?? "{author}",
     save_metadata: config.save_metadata ?? current.save_metadata ?? true,
-    proxy: config.proxy ?? current.proxy ?? null,
+    proxy: hasProxyPatch ? (config.proxy ?? null) : (current.proxy ?? null),
     cookie: config.cookie ?? "",
     im_friend_sec_user_ids: config.im_friend_sec_user_ids ?? current.im_friend_sec_user_ids ?? [],
     im_friend_include_all_users:
@@ -1760,4 +1761,3 @@ export async function checkFilesExist(paths: string[]): Promise<boolean[]> {
   }
   return invoke<boolean[]>("check_files_exist", { paths });
 }
-

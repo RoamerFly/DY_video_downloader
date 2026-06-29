@@ -55,6 +55,13 @@ def get_current_app_version(Config=None) -> str:
     return '0.0.13'
 
 
+def update_request_proxies(Config=None) -> dict | None:
+    proxy = str(getattr(Config, 'PROXY', '') if Config else '').strip()
+    if not proxy:
+        return None
+    return {'http': proxy, 'https': proxy}
+
+
 def fetch_latest_release(http_requests, latest_release_api_url: str, Config=None) -> dict:
     response = http_requests.get(
         latest_release_api_url,
@@ -62,6 +69,7 @@ def fetch_latest_release(http_requests, latest_release_api_url: str, Config=None
             'Accept': 'application/vnd.github+json',
             'User-Agent': f'better-douyin/{get_current_app_version(Config)}',
         },
+        proxies=update_request_proxies(Config),
         timeout=(5, 15),
     )
     response.raise_for_status()
@@ -79,6 +87,7 @@ def fetch_updater_metadata(http_requests, updater_metadata_url: str, logger=None
                 'Accept': 'application/json',
                 'User-Agent': f'better-douyin/{get_current_app_version(Config)}',
             },
+            proxies=update_request_proxies(Config),
             timeout=(5, 15),
         )
         if response.status_code == 404:

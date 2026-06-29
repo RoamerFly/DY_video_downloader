@@ -75,7 +75,7 @@ class Config:
     CURRENT_USER_PROFILE = None
     ACCOUNTS = []
     CURRENT_SEC_UID = ""
-    APP_VERSION = (os.environ.get("APP_VERSION") or os.environ.get("GITHUB_REF_NAME") or "1.0.32").lstrip("v")
+    APP_VERSION = (os.environ.get("APP_VERSION") or os.environ.get("GITHUB_REF_NAME") or "1.0.31").lstrip("v")
 
     # 文件保存路径默认值
     BASE_DIR = get_default_download_dir(USER_DATA_DIR)
@@ -93,6 +93,7 @@ class Config:
         "2160p": "4k",
     }
     MAX_CONCURRENT = 3
+    PROXY = ""
     
     # 请求参数
     HOST = 'https://www.douyin.com'
@@ -202,6 +203,7 @@ class Config:
                     cls.ACCOUNTS = config_data.get("accounts", [])
                     cls.CURRENT_SEC_UID = config_data.get("current_sec_uid", "")
                     cls.BASE_DIR = config_data.get("base_dir", cls.BASE_DIR)
+                    cls.PROXY = cls.normalize_proxy(config_data.get("proxy", cls.PROXY))
                     cls.DOWNLOAD_DIR = cls.BASE_DIR
                     cls.HISTORY_DIRS = cls.normalize_history_dirs(config_data.get("history_dirs", []))
                     cls.DOWNLOAD_QUALITY = cls.normalize_download_quality(
@@ -279,6 +281,7 @@ class Config:
                     im_friend_sec_user_ids=cls.IM_FRIEND_SEC_USER_IDS,
                     im_friend_include_all_users=cls.IM_FRIEND_INCLUDE_ALL_USERS,
                     im_friend_refresh_interval_seconds=cls.IM_FRIEND_REFRESH_INTERVAL_SECONDS,
+                    proxy=cls.PROXY,
                 )
                 print(f"\033[93m检测到不安全的下载目录在安装包/程序包内，已自动重置为: {safe_default}\033[0m")
 
@@ -292,6 +295,7 @@ class Config:
         env_base_dir = os.environ.get("DOUYIN_BASE_DIR")
         env_quality = os.environ.get("DOUYIN_DOWNLOAD_QUALITY")
         env_max_concurrent = os.environ.get("DOUYIN_MAX_CONCURRENT")
+        env_proxy = os.environ.get("DOUYIN_PROXY")
         env_relation_signer = os.environ.get("DOUYIN_RELATION_SIGNER")
 
         if env_cookie is not None:
@@ -306,6 +310,8 @@ class Config:
                 cls.MAX_CONCURRENT = max(1, min(10, int(env_max_concurrent)))
             except Exception:
                 pass
+        if env_proxy is not None:
+            cls.PROXY = cls.normalize_proxy(env_proxy)
         if env_relation_signer:
             try:
                 signer = json.loads(env_relation_signer)
@@ -357,6 +363,16 @@ class Config:
         return "auto"
 
     @classmethod
+    def normalize_proxy(cls, proxy):
+        """归一化 HTTP(S) 代理配置。"""
+        value = str(proxy or '').strip()
+        if not value:
+            return ""
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("proxy must start with http:// or https://")
+        return value
+
+    @classmethod
     def normalize_sec_user_ids(cls, values):
         """归一化 IM 好友 sec_user_id 缓存。"""
         if not isinstance(values, list):
@@ -391,6 +407,7 @@ class Config:
         im_friend_sec_user_ids=None,
         im_friend_include_all_users=None,
         im_friend_refresh_interval_seconds=None,
+        proxy=None,
     ):
         """保存配置到配置文件"""
         resolved_quality = cls.normalize_download_quality(download_quality or cls.DOWNLOAD_QUALITY)
@@ -407,6 +424,7 @@ class Config:
             cls.FOLDER_NAME_TEMPLATE,
         )
         resolved_auto_create_folder = cls.AUTO_CREATE_FOLDER if auto_create_folder is None else bool(auto_create_folder)
+        resolved_proxy = cls.normalize_proxy(proxy if proxy is not None else cls.PROXY)
         resolved_accounts = accounts if accounts is not None else cls.ACCOUNTS
         resolved_current_sec_uid = current_sec_uid if current_sec_uid is not None else cls.CURRENT_SEC_UID
         resolved_im_friend_sec_user_ids = cls.normalize_sec_user_ids(
@@ -443,6 +461,7 @@ class Config:
             "filename_template": resolved_filename_template,
             "folder_name_template": resolved_folder_name_template,
             "auto_create_folder": resolved_auto_create_folder,
+            "proxy": resolved_proxy,
             "accounts": resolved_accounts,
             "current_sec_uid": resolved_current_sec_uid,
             "im_friend_sec_user_ids": resolved_im_friend_sec_user_ids,
