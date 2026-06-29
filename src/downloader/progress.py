@@ -37,6 +37,7 @@ class Progress:
         """获取下载用的请求头"""
         headers = Config.COMMON_HEADERS.copy()
         headers.update({
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
             'Accept': '*/*',
             'Accept-Encoding': 'identity;q=1, *;q=0',
             'Range': 'bytes=0-',
