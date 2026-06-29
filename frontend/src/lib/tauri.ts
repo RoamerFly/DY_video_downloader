@@ -24,6 +24,7 @@ import type {
   LinkParseResponse,
   MixVideosResponse,
   PublishCommentResponse,
+  NoticesResponse,
   RecommendedFeedType,
   RecommendedResponse,
   SearchUserResponse,
@@ -1420,6 +1421,31 @@ export async function getFriendMessageHistory(payload: {
   return invokeLocal("get_friend_message_history", {
     ...body,
   });
+}
+
+export async function getNotices(payload: {
+  count?: number;
+  maxTime?: number;
+  minTime?: number;
+  noticeGroup?: number;
+} = {}): Promise<NoticesResponse> {
+  const body = {
+    count: payload.count ?? 10,
+    max_time: payload.maxTime ?? 0,
+    maxTime: payload.maxTime ?? 0,
+    min_time: payload.minTime ?? 0,
+    minTime: payload.minTime ?? 0,
+    notice_group: payload.noticeGroup ?? 960,
+    noticeGroup: payload.noticeGroup ?? 960,
+  };
+  if (shouldUseBrowserBridge()) {
+    return requestJson<NoticesResponse>("/api/get_notices", {
+      method: "POST",
+      body: JSON.stringify(body),
+      suppressCookieInvalidEvent: true,
+    });
+  }
+  return invokeLocal<NoticesResponse>("get_notices", body);
 }
 
 export async function getFriendChatState(currentSecUid?: string): Promise<FriendChatStateResponse> {
