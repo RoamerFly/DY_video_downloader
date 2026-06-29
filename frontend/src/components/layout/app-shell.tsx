@@ -55,7 +55,7 @@ export function AppShell() {
           className={cn(
             "relative flex-1 overflow-x-hidden rounded-t-[24px]",
             currentView === "friends-status"
-              ? "flex flex-col overflow-y-hidden pb-14 pt-2"
+              ? "flex flex-col overflow-y-hidden pb-0 pt-2"
               : "overflow-y-auto pb-16 pt-2"
           )}
         >
@@ -133,7 +133,7 @@ function renderView(view: string) {
       );
     case "friends-status":
       return (
-        <motion.div key="friends-status" {...variants} transition={transition} className="box-border h-full min-h-0 p-4">
+        <motion.div key="friends-status" {...variants} transition={transition} className="box-border h-full min-h-0 pt-2 pb-0 px-4">
           <FriendsStatusView />
         </motion.div>
       );
